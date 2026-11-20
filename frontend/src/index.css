@@ -1,0 +1,55 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  --color-bg: #09090b;
+  --color-card: #0f0f11;
+  --color-hover: #18181b;
+  --color-line: #27272a;
+  --color-muted: #a1a1aa;
+  --color-faint: #71717a;
+  --color-accent: #2dd4bf;
+  --color-income: #4ade80;
+  --color-expense: #f87171;
+  --color-warn: #fbbf24;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--color-bg);
+  color: #fafafa;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Privacy mode: blur every amount until hovered. */
+.privacy-masked .maskable {
+  filter: blur(6px);
+  transition: filter 150ms;
+}
+.privacy-masked .maskable:hover {
+  filter: none;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--color-accent) 35%, transparent);
+}
+
+/* Native form controls in the dark theme */
+input,
+select,
+textarea {
+  color-scheme: dark;
+}
+
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: #27272a transparent;
+}

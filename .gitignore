@@ -1,0 +1,18 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Portable Node, CA bundle, npm/pip caches
+tools/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# Never commit financial data
+data/
+*.db
+*.db-wal
+*.db-shm

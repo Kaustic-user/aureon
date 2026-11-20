@@ -1,0 +1,511 @@
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { Archive, Loader2, Plus, RefreshCw, Search, Tag, Trash2, TrendingUp } from "lucide-react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { Amount, Button, Card, Dialog, Empty, ErrorNote, Field, Input, PageHeader, Segmented, Select, Skeleton } from "../components/ui";
+import { api, type AmfiScheme, type Holding, type Instrument, type InstrumentKind, type InvTxn } from "../lib/api";
+import { money, pct, rupeesInput, shortDate, todayISO, toPaise } from "../lib/format";
+import { useAccounts, useInvalidateAll, usePortfolio } from "../lib/queries";
+import { cn } from "../lib/utils";
+
+type Tab = "all" | InstrumentKind;
+
+/** Format a decimal string for display without float noise. */
+function dec(s: string | null, max = 4): string {
+  if (s == null) return "—";
+  const n = Number(s);
+  return n.toLocaleString("en-IN", { maximumFractionDigits: max });
+}
+
+export default function Investments() {
+  const { data, error, isLoading } = usePortfolio();
+  const [tab, setTab] = useState<Tab>("all");
+  const [adding, setAdding] = useState(false);
+  const [selected, setSelected] = useState<Holding | null>(null);
+  const invalidate = useInvalidateAll();
+  const refresh = useMutation({
+    mutationFn: () => api.post<{ updated: number; not_found: string[]; nav_date: string | null }>("/investments/prices/refresh"),
+    onSuccess: invalidate,
+  });
+
+  const holdings = useMemo(() => {
+    const list = (data?.holdings ?? []).filter((h) => !h.instrument.archived && (tab === "all" || h.instrument.kind === tab));
+    return list.sort((a, b) => (b.value ?? b.invested) - (a.value ?? a.invested));
+  }, [data, tab]);
+  const totals = tab === "all" ? data?.totals : data?.by_kind[tab];
+  const current = holdings.filter((h) => Number(h.units) > 0);
+  const closed = holdings.filter((h) => Number(h.units) === 0);
+
+  // keep the detail dialog in sync after edits
+  useEffect(() => {
+    if (selected && data) setSelected(data.holdings.find((h) => h.instrument.id === selected.instrument.id) ?? null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
+
+  return (
+    <>
+      <PageHeader
+        title="Investments"
+        subtitle="Mutual funds use AMFI NAVs · stock prices are entered by you"
+        actions={
+          <>
+            <Button onClick={() => refresh.mutate()} disabled={refresh.isPending} title="Download the latest NAVs from AMFI">
+              {refresh.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} Refresh NAVs
+            </Button>
+            <Button variant="primary" onClick={() => setAdding(true)}>
+              <Plus className="h-4 w-4" /> Add holding
+            </Button>
+          </>
+        }
+      />
+      <ErrorNote error={error ?? refresh.error} />
+      {refresh.data && (
+        <p className="rounded-md border border-line bg-card px-3 py-2 text-xs text-muted">
+          Updated {refresh.data.updated} fund{refresh.data.updated === 1 ? "" : "s"}
+          {refresh.data.nav_date && <> · NAV date {shortDate(refresh.data.nav_date)}</>}
+          {refresh.data.not_found.length > 0 && <span className="text-warn"> · not found: {refresh.data.not_found.join(", ")}</span>}
+        </p>
+      )}
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Kpi label="Current value">{totals ? <Amount value={totals.value} /> : "—"}</Kpi>
+        <Kpi label="Invested">{totals ? <Amount value={totals.invested} /> : "—"}</Kpi>
+        <Kpi label="Unrealised P&L" caption={totals && pct(totals.unrealized_pct, 1, true)}>
+          {totals ? <Amount value={totals.unrealized} kind="gain" /> : "—"}
+        </Kpi>
+        <Kpi label="XIRR" caption={totals && <>Day <Amount value={totals.day_change} kind="gain" /></>}>
+          <span className={cn("font-mono tabular-nums", (totals?.xirr ?? 0) < 0 ? "text-expense" : "")}>{pct(totals?.xirr)}</span>
+        </Kpi>
+      </div>
+
+      <Card className="p-0">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line p-3">
+          <Segmented<Tab>
+            value={tab}
+            onChange={setTab}
+            options={[
+              { value: "all", label: "All" },
+              { value: "mutual_fund", label: "Mutual funds" },
+              { value: "stock", label: "Stocks" },
+            ]}
+          />
+          {totals && totals.realized !== 0 && (
+            <span className="text-xs text-faint">
+              Realised <Amount value={totals.realized} kind="gain" /> · Dividends <Amount value={totals.dividends} />
+            </span>
+          )}
+        </div>
+        {isLoading ? (
+          <div className="space-y-2 p-4">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-12" />)}</div>
+        ) : holdings.length === 0 ? (
+          <Empty icon={<TrendingUp className="h-6 w-6" />} title="No holdings yet">
+            Add a mutual fund (search AMFI by name) or a stock, then record your buys.
+          </Empty>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] text-sm">
+              <thead>
+                <tr className="border-b border-line text-left text-xs text-faint">
+                  <th className="px-4 py-2 font-medium">Holding</th>
+                  <th className="py-2 text-right font-medium">Units</th>
+                  <th className="py-2 text-right font-medium">Price</th>
+                  <th className="py-2 text-right font-medium">Invested</th>
+                  <th className="py-2 text-right font-medium">Value</th>
+                  <th className="py-2 text-right font-medium">P&L</th>
+                  <th className="px-4 py-2 text-right font-medium">XIRR</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...current, ...closed].map((h) => (
+                  <tr key={h.instrument.id} onClick={() => setSelected(h)} className={cn("cursor-pointer border-b border-line/60 last:border-0 hover:bg-hover", Number(h.units) === 0 && "opacity-60")}>
+                    <td className="max-w-[300px] px-4 py-2.5">
+                      <div className="truncate">{h.instrument.name}</div>
+                      <div className="text-xs text-faint">
+                        {h.instrument.kind === "stock" ? `${h.instrument.exchange ?? "NSE"}:${h.instrument.symbol}` : `AMFI ${h.instrument.symbol}`}
+                        {h.instrument.sub_category && ` · ${h.instrument.sub_category}`}
+                        {Number(h.units) === 0 && " · closed"}
+                      </div>
+                    </td>
+                    <td className="maskable py-2.5 text-right font-mono tabular-nums text-muted">{dec(h.units, 3)}</td>
+                    <td className="py-2.5 text-right">
+                      <div className="font-mono tabular-nums">{h.price ? dec(h.price, 2) : <span className="text-warn">set price</span>}</div>
+                      {h.price_date && <div className="text-[11px] text-faint">{shortDate(h.price_date)}</div>}
+                    </td>
+                    <td className="py-2.5 text-right"><Amount value={h.invested} className="text-muted" /></td>
+                    <td className="py-2.5 text-right">{h.value != null ? <Amount value={h.value} /> : "—"}</td>
+                    <td className="py-2.5 text-right">
+                      {h.unrealized != null ? (
+                        <>
+                          <Amount value={h.unrealized} kind="gain" />
+                          <div className={cn("font-mono text-[11px]", (h.unrealized_pct ?? 0) >= 0 ? "text-income/80" : "text-expense/80")}>{pct(h.unrealized_pct, 1, true)}</div>
+                        </>
+                      ) : "—"}
+                    </td>
+                    <td className={cn("px-4 py-2.5 text-right font-mono tabular-nums", (h.xirr ?? 0) < 0 ? "text-expense" : "text-zinc-200")}>{pct(h.xirr)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+      <p className="text-xs text-faint">
+        Cost basis is FIFO. XIRR is shown once a holding is at least 30 days old. Tip: click a holding to record a buy, sell, dividend or price.
+      </p>
+
+      <AddInstrument open={adding} onClose={() => setAdding(false)} />
+      <HoldingDialog holding={selected} onClose={() => setSelected(null)} />
+    </>
+  );
+}
+
+function Kpi({ label, children, caption }: { label: string; children: React.ReactNode; caption?: React.ReactNode }) {
+  return (
+    <Card className="transition hover:border-zinc-700 hover:bg-hover">
+      <div className="text-sm text-muted">{label}</div>
+      <div className="mt-2 text-2xl font-bold">{children}</div>
+      <div className="mt-1 min-h-4 font-mono text-xs text-faint">{caption}</div>
+    </Card>
+  );
+}
+
+// ------------------------------------------------------------ add instrument
+
+function AddInstrument({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const invalidate = useInvalidateAll();
+  const [kind, setKind] = useState<InstrumentKind>("mutual_fund");
+  const [q, setQ] = useState("");
+  const [debounced, setDebounced] = useState("");
+  const [picked, setPicked] = useState<AmfiScheme | null>(null);
+  const [name, setName] = useState("");
+  const [symbol, setSymbol] = useState("");
+  const [exchange, setExchange] = useState("NSE");
+  const [sub, setSub] = useState("");
+
+  useEffect(() => {
+    if (open) {
+      setQ(""); setDebounced(""); setPicked(null); setName(""); setSymbol(""); setSub(""); setExchange("NSE");
+    }
+  }, [open]);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(q.trim()), 300);
+    return () => clearTimeout(t);
+  }, [q]);
+
+  const search = useQuery({
+    queryKey: ["amfi", debounced],
+    queryFn: () => api.get<AmfiScheme[]>("/investments/amfi/search", { q: debounced }),
+    enabled: open && kind === "mutual_fund" && debounced.length >= 3 && !picked,
+    staleTime: 6 * 3600_000,
+  });
+
+  const save = useMutation({
+    mutationFn: (body: object) => api.post<Instrument>("/investments/instruments", body),
+    onSuccess: async (inst) => {
+      // Record today's NAV right away so the holding has a price.
+      if (picked?.nav && picked.nav_date) {
+        await api.post("/investments/prices", { instrument_id: inst.id, date: picked.nav_date, price: picked.nav }).catch(() => {});
+      }
+      invalidate();
+      onClose();
+    },
+  });
+
+  function submit(e: FormEvent) {
+    e.preventDefault();
+    if (kind === "mutual_fund") {
+      if (!picked) return;
+      save.mutate({ kind, name: picked.name, symbol: picked.code, isin: picked.isin, sub_category: sub || null });
+    } else {
+      save.mutate({ kind, name, symbol: symbol.toUpperCase(), exchange, sub_category: sub || null });
+    }
+  }
+
+  return (
+    <Dialog
+      open={open}
+      onClose={onClose}
+      title="Add holding"
+      wide
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="primary" type="submit" form="inst-form" disabled={save.isPending || (kind === "mutual_fund" ? !picked : !name.trim() || !symbol.trim())}>
+            Add
+          </Button>
+        </>
+      }
+    >
+      <form id="inst-form" onSubmit={submit} className="space-y-4">
+        <Segmented value={kind} onChange={(k) => { setKind(k); setPicked(null); }} options={[{ value: "mutual_fund", label: "Mutual fund" }, { value: "stock", label: "Stock" }]} />
+        {kind === "mutual_fund" ? (
+          picked ? (
+            <div className="flex items-start justify-between gap-3 rounded-md border border-line p-3">
+              <div>
+                <div className="text-sm">{picked.name}</div>
+                <div className="mt-0.5 text-xs text-faint">
+                  Code {picked.code}{picked.isin && ` · ${picked.isin}`}
+                  {picked.nav && ` · NAV ₹${dec(picked.nav)} on ${picked.nav_date && shortDate(picked.nav_date)}`}
+                </div>
+              </div>
+              <Button size="sm" variant="ghost" onClick={() => setPicked(null)}>Change</Button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" />
+                <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search AMFI, e.g. parag parikh flexi direct growth" className="pl-9" autoFocus />
+              </div>
+              <div className="scrollbar-thin max-h-72 overflow-y-auto rounded-md border border-line">
+                {debounced.length < 3 ? (
+                  <p className="p-3 text-xs text-faint">Type at least 3 characters. Include “direct growth” to narrow it down. First search downloads the AMFI list (a few seconds).</p>
+                ) : search.isFetching ? (
+                  <p className="flex items-center gap-2 p-3 text-xs text-muted"><Loader2 className="h-3.5 w-3.5 animate-spin" /> Searching…</p>
+                ) : search.error ? (
+                  <div className="p-3"><ErrorNote error={search.error} /></div>
+                ) : search.data?.length ? (
+                  search.data.map((s) => (
+                    <button key={s.code} type="button" onClick={() => setPicked(s)} className="flex w-full items-center justify-between gap-3 border-b border-line/60 px-3 py-2 text-left text-sm last:border-0 hover:bg-hover">
+                      <span className="min-w-0">
+                        <span className="block truncate">{s.name}</span>
+                        <span className="text-xs text-faint">{s.code}</span>
+                      </span>
+                      <span className="shrink-0 font-mono text-xs text-muted">{s.nav ? `₹${dec(s.nav)}` : "—"}</span>
+                    </button>
+                  ))
+                ) : (
+                  <p className="p-3 text-xs text-faint">No schemes match.</p>
+                )}
+              </div>
+            </div>
+          )
+        ) : (
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Company name" className="col-span-2">
+              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Infosys" autoFocus />
+            </Field>
+            <Field label="Symbol">
+              <Input value={symbol} onChange={(e) => setSymbol(e.target.value)} placeholder="INFY" className="font-mono uppercase" />
+            </Field>
+            <Field label="Exchange">
+              <Select value={exchange} onChange={(e) => setExchange(e.target.value)}>
+                <option>NSE</option>
+                <option>BSE</option>
+              </Select>
+            </Field>
+          </div>
+        )}
+        <Field label="Label (optional)" hint="e.g. Index, Flexi cap, IT, Banking — for grouping">
+          <Input value={sub} onChange={(e) => setSub(e.target.value)} maxLength={60} />
+        </Field>
+        <ErrorNote error={save.error} />
+      </form>
+    </Dialog>
+  );
+}
+
+// ------------------------------------------------------------ holding detail
+
+function HoldingDialog({ holding, onClose }: { holding: Holding | null; onClose: () => void }) {
+  const inst = holding?.instrument;
+  const invalidate = useInvalidateAll();
+  const { data: accounts = [] } = useAccounts();
+  const txns = useQuery({
+    queryKey: ["inv-txns", inst?.id],
+    queryFn: () => api.get<InvTxn[]>(`/investments/instruments/${inst!.id}/txns`),
+    enabled: !!inst,
+  });
+  const [editing, setEditing] = useState<InvTxn | "new" | null>(null);
+  const [priceVal, setPriceVal] = useState("");
+  const [priceDate, setPriceDate] = useState(todayISO());
+  useEffect(() => {
+    setEditing(null);
+    setPriceVal("");
+    setPriceDate(todayISO());
+  }, [inst?.id]);
+
+  const done = () => {
+    invalidate();
+    txns.refetch();
+  };
+  const setPrice = useMutation({
+    mutationFn: () => api.post("/investments/prices", { instrument_id: inst!.id, date: priceDate, price: priceVal.replace(/,/g, "") }),
+    onSuccess: () => { setPriceVal(""); done(); },
+  });
+  const archive = useMutation({
+    mutationFn: () => api.put(`/investments/instruments/${inst!.id}`, { ...inst!, archived: true }),
+    onSuccess: () => { invalidate(); onClose(); },
+  });
+  const remove = useMutation({
+    mutationFn: () => api.del(`/investments/instruments/${inst!.id}`),
+    onSuccess: () => { invalidate(); onClose(); },
+  });
+  const accName = new Map(accounts.map((a) => [a.id, a.name]));
+  const avg = holding && Number(holding.units) > 0 ? holding.invested / 100 / Number(holding.units) : null;
+
+  return (
+    <Dialog open={!!holding} onClose={onClose} title={inst?.name ?? ""} wide>
+      {holding && inst && (
+        <>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <Stat label="Units" value={<span className="maskable font-mono">{dec(holding.units, 4)}</span>} />
+            <Stat label="Avg cost" value={<span className="maskable font-mono">{avg ? `₹${avg.toLocaleString("en-IN", { maximumFractionDigits: 2 })}` : "—"}</span>} />
+            <Stat label="Value" value={holding.value != null ? <Amount value={holding.value} /> : "—"} />
+            <Stat label="P&L" value={holding.unrealized != null ? <Amount value={holding.unrealized} kind="gain" /> : "—"} />
+          </div>
+          {(holding.realized !== 0 || holding.dividends !== 0) && (
+            <p className="text-xs text-faint">
+              Realised <Amount value={holding.realized} kind="gain" /> · Dividends <Amount value={holding.dividends} />
+            </p>
+          )}
+
+          <div className="rounded-md border border-line p-3">
+            <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted">
+              <Tag className="h-3.5 w-3.5" /> Price
+              <span className="font-normal text-faint">
+                {holding.price ? ` · ₹${dec(holding.price, 4)} on ${shortDate(holding.price_date!)} (${holding.price_source})` : " · none yet"}
+              </span>
+            </div>
+            <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); if (Number(priceVal.replace(/,/g, "")) > 0) setPrice.mutate(); }}>
+              <Input value={priceVal} onChange={(e) => setPriceVal(e.target.value)} inputMode="decimal" placeholder={inst.kind === "stock" ? "Last traded price" : "NAV"} className="w-40 font-mono" />
+              <Input type="date" value={priceDate} onChange={(e) => setPriceDate(e.target.value)} className="w-40" />
+              <Button type="submit" disabled={setPrice.isPending}>Set price</Button>
+            </form>
+            <ErrorNote error={setPrice.error} />
+          </div>
+
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-sm font-semibold">History</span>
+              <Button size="sm" variant="primary" onClick={() => setEditing("new")}><Plus className="h-3.5 w-3.5" /> Record</Button>
+            </div>
+            {editing && <InvTxnForm inst={inst} txn={editing === "new" ? null : editing} onDone={() => { setEditing(null); done(); }} onCancel={() => setEditing(null)} />}
+            <div className="scrollbar-thin max-h-64 overflow-y-auto rounded-md border border-line">
+              {txns.data?.length ? (
+                <table className="w-full text-sm">
+                  <tbody>
+                    {txns.data.map((t) => (
+                      <tr key={t.id} onClick={() => setEditing(t)} className="cursor-pointer border-b border-line/60 last:border-0 hover:bg-hover">
+                        <td className="px-3 py-2 text-xs text-muted">{shortDate(t.date)} {t.date.slice(0, 4)}</td>
+                        <td className="py-2">
+                          <span className={cn("rounded px-1.5 py-0.5 text-[11px] font-medium uppercase", t.type === "buy" ? "bg-teal-500/10 text-accent" : t.type === "sell" ? "bg-amber-500/10 text-warn" : "bg-green-500/10 text-income")}>{t.type}</span>
+                        </td>
+                        <td className="maskable py-2 text-right font-mono text-xs text-muted">{t.units ? `${dec(t.units, 4)} @ ${dec(t.price, 2)}` : ""}</td>
+                        <td className="py-2 text-right"><Amount value={t.amount} exact={t.amount % 100 !== 0} /></td>
+                        <td className="hidden px-3 py-2 text-right text-xs text-faint sm:table-cell">{t.account_id ? accName.get(t.account_id) : "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <p className="p-3 text-xs text-faint">{txns.isLoading ? "Loading…" : "No transactions yet — record your first buy."}</p>
+              )}
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 border-t border-line pt-3">
+            <ErrorNote error={archive.error ?? remove.error} />
+            {txns.data?.length ? (
+              <Button size="sm" variant="ghost" onClick={() => confirm("Archive this holding? It will be hidden; history is kept.") && archive.mutate()}>
+                <Archive className="h-3.5 w-3.5" /> Archive
+              </Button>
+            ) : (
+              <Button size="sm" variant="danger" onClick={() => remove.mutate()}>
+                <Trash2 className="h-3.5 w-3.5" /> Remove
+              </Button>
+            )}
+          </div>
+        </>
+      )}
+    </Dialog>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="rounded-md border border-line p-2.5">
+      <div className="text-xs text-faint">{label}</div>
+      <div className="mt-1 text-sm">{value}</div>
+    </div>
+  );
+}
+
+function InvTxnForm({ inst, txn, onDone, onCancel }: { inst: Instrument; txn: InvTxn | null; onDone: () => void; onCancel: () => void }) {
+  const { data: accounts = [] } = useAccounts();
+  const [type, setType] = useState<InvTxn["type"]>(txn?.type ?? "buy");
+  const [date, setDate] = useState(txn?.date ?? todayISO());
+  const [units, setUnits] = useState(txn?.units ?? "");
+  const [price, setPrice] = useState(txn?.price ?? "");
+  const [amount, setAmount] = useState(txn ? rupeesInput(txn.amount) : "");
+  const [amountTouched, setAmountTouched] = useState(!!txn);
+  const [accountId, setAccountId] = useState(txn ? String(txn.account_id ?? "") : String(accounts.find((a) => a.type === "bank" && !a.archived)?.id ?? ""));
+  const [note, setNote] = useState(txn?.note ?? "");
+
+  // Suggest amount = units × price until the user edits it (charges, stamp duty…)
+  useEffect(() => {
+    if (amountTouched || type === "dividend") return;
+    const u = Number(units), p = Number(price);
+    if (u > 0 && p > 0) setAmount((Math.round(u * p * 100) / 100).toFixed(2));
+  }, [units, price, type, amountTouched]);
+
+  const save = useMutation({
+    mutationFn: (body: object) => (txn ? api.put(`/investments/txns/${txn.id}`, body) : api.post("/investments/txns", body)),
+    onSuccess: onDone,
+  });
+  const del = useMutation({ mutationFn: () => api.del(`/investments/txns/${txn!.id}`), onSuccess: onDone });
+
+  function submit(e: FormEvent) {
+    e.preventDefault();
+    const paise = toPaise(amount);
+    if (!paise) return;
+    save.mutate({
+      instrument_id: inst.id,
+      account_id: accountId ? Number(accountId) : null,
+      date,
+      type,
+      units: type === "dividend" ? null : units.trim(),
+      price: type === "dividend" || !price.trim() ? null : price.trim(),
+      amount: paise,
+      note: note.trim() || null,
+    });
+  }
+
+  return (
+    <form onSubmit={submit} className="mb-3 space-y-3 rounded-md border border-zinc-700 bg-bg p-3">
+      <Segmented value={type} onChange={setType} options={[{ value: "buy", label: "Buy" }, { value: "sell", label: "Sell" }, { value: "dividend", label: "Dividend" }]} />
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Field label="Date"><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} required /></Field>
+        {type !== "dividend" && (
+          <>
+            <Field label="Units"><Input value={units} onChange={(e) => setUnits(e.target.value)} inputMode="decimal" className="font-mono" required /></Field>
+            <Field label={inst.kind === "mutual_fund" ? "NAV" : "Price"}><Input value={price} onChange={(e) => setPrice(e.target.value)} inputMode="decimal" className="font-mono" /></Field>
+          </>
+        )}
+        <Field label={type === "buy" ? "Total paid (₹)" : "Received (₹)"}>
+          <Input value={amount} onChange={(e) => { setAmount(e.target.value); setAmountTouched(true); }} inputMode="decimal" className="font-mono" required />
+        </Field>
+        <Field label={type === "buy" ? "Paid from" : "Credited to"} className="col-span-2">
+          <Select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+            <option value="">Not tracked</option>
+            {accounts.filter((a) => !a.archived || String(a.id) === accountId).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </Select>
+        </Field>
+        <Field label="Note" className="col-span-2"><Input value={note} onChange={(e) => setNote(e.target.value)} /></Field>
+      </div>
+      {type !== "dividend" && units && price && Number(units) > 0 && (
+        <p className="text-xs text-faint">
+          {units} × ₹{price} = <span className="font-mono">{money(Math.round(Number(units) * Number(price) * 100), { exact: true })}</span>. Adjust the total for charges.
+        </p>
+      )}
+      <ErrorNote error={save.error ?? del.error} />
+      <div className="flex justify-end gap-2">
+        {txn && (
+          <Button size="sm" variant="danger" className="mr-auto" onClick={() => confirm("Delete this entry?") && del.mutate()}>
+            <Trash2 className="h-3.5 w-3.5" /> Delete
+          </Button>
+        )}
+        <Button size="sm" variant="ghost" onClick={onCancel}>Cancel</Button>
+        <Button size="sm" variant="primary" type="submit" disabled={save.isPending}>{txn ? "Save" : "Record"}</Button>
+      </div>
+    </form>
+  );
+}

@@ -1,0 +1,9 @@
+[project]
+name = "aureon-backend"
+version = "0.1.0"
+description = "Aureon: local-first personal finance manager (API + storage)"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
