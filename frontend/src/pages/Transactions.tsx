@@ -2,13 +2,15 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowLeftRight, Plus, Receipt, Search, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
+import { RangePicker } from "../components/RangePicker";
 import { CategoryOptions, txnToDraft } from "../components/TxnDialog";
-import { Amount, Button, Card, Empty, ErrorNote, Input, PageHeader, Select, Skeleton } from "../components/ui";
+import { Amount, Button, Card, Empty, ErrorNote, Input, PageHeader, Segmented, Select, Skeleton } from "../components/ui";
 import { useActions } from "../lib/actions";
 import { api, type Txn, type TxnPage } from "../lib/api";
 import { dayHeading, money, monthLabel } from "../lib/format";
 import { categoryIndex, useAccounts, useCategories } from "../lib/queries";
 import { useMonthParam } from "../lib/useMonth";
+import { monthBounds, rangeLabel, useRangeParam } from "../lib/useRange";
 import { cn } from "../lib/utils";
 import { MonthPicker } from "./Overview";
 
@@ -16,6 +18,7 @@ const PAGE = 100;
 
 export default function Transactions() {
   const [month, setMonth] = useMonthParam();
+  const [range, setRange] = useRangeParam();
   const [params, setParams] = useSearchParams();
   const { openTxn } = useActions();
   const { data: accounts = [] } = useAccounts();
@@ -33,7 +36,7 @@ export default function Transactions() {
     const t = setTimeout(() => setDebouncedQ(q.trim()), 250);
     return () => clearTimeout(t);
   }, [q]);
-  useEffect(() => setLimit(PAGE), [month, kind, accountId, categoryId, debouncedQ]);
+  useEffect(() => setLimit(PAGE), [month, range?.start, range?.end, kind, accountId, categoryId, debouncedQ]);
 
   const setParam = (k: string, v: string) =>
     setParams((p) => {
@@ -44,11 +47,13 @@ export default function Transactions() {
     }, { replace: true });
 
   const { data, error, isLoading, isFetching } = useQuery({
-    queryKey: ["transactions", month, kind, accountId, categoryId, debouncedQ, limit],
+    queryKey: ["transactions", month, range?.start, range?.end, kind, accountId, categoryId, debouncedQ, limit],
     queryFn: () =>
       api.get<TxnPage>("/transactions", {
-        // A search looks across all time; otherwise scope to the month.
-        month: debouncedQ ? undefined : month,
+        // A search looks across all time; otherwise scope to the custom range or the month.
+        month: debouncedQ || range ? undefined : month,
+        start: debouncedQ ? undefined : range?.start,
+        end: debouncedQ ? undefined : range?.end,
         kind,
         account_id: accountId,
         category_id: categoryId,
@@ -75,10 +80,22 @@ export default function Transactions() {
     <>
       <PageHeader
         title="Transactions"
-        subtitle={debouncedQ ? `Searching all time for “${debouncedQ}”` : monthLabel(month)}
+        subtitle={debouncedQ ? `Searching all time for “${debouncedQ}”` : range ? rangeLabel(range) : monthLabel(month)}
         actions={
           <>
-            {!debouncedQ && <MonthPicker month={month} onChange={setMonth} />}
+            {!debouncedQ && (
+              <>
+                <Segmented
+                  value={range ? "range" : "month"}
+                  onChange={(m) => setRange(m === "range" ? monthBounds(month) : null)}
+                  options={[
+                    { value: "month", label: "Month" },
+                    { value: "range", label: "Range" },
+                  ]}
+                />
+                {range ? <RangePicker value={range} onChange={setRange} /> : <MonthPicker month={month} onChange={setMonth} />}
+              </>
+            )}
             <Button variant="primary" onClick={() => openTxn({ kind: (kind as "income") || "expense" })}>
               <Plus className="h-4 w-4" /> Add
             </Button>
@@ -113,7 +130,13 @@ export default function Transactions() {
             variant="ghost"
             onClick={() => {
               setQ("");
-              setParams(month ? new URLSearchParams(params.get("month") ? { month } : {}) : {}, { replace: true });
+              // Clear filters but keep the period (month or custom range).
+              const keep = new URLSearchParams();
+              for (const k of ["month", "start", "end"]) {
+                const v = params.get(k);
+                if (v) keep.set(k, v);
+              }
+              setParams(keep, { replace: true });
             }}
           >
             <X className="h-4 w-4" /> Clear
@@ -134,7 +157,7 @@ export default function Transactions() {
         {isLoading ? (
           <div className="space-y-2 p-4">{[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-10" />)}</div>
         ) : groups.length === 0 ? (
-          <Empty icon={<Receipt className="h-6 w-6" />} title={filtered ? "No matching transactions" : "No transactions this month"}>
+          <Empty icon={<Receipt className="h-6 w-6" />} title={filtered ? "No matching transactions" : range ? "No transactions in this range" : "No transactions this month"}>
             Press Ctrl K anywhere to add one quickly.
           </Empty>
         ) : (
