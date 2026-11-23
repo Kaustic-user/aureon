@@ -312,7 +312,80 @@ def portfolio_value_at(
     return total
 
 
+def portfolio_history(session: Session, today: date | None = None) -> list[dict]:
+    """Portfolio market value vs cost basis over time, for the Investments chart.
+
+    Weekly points while the history is under ~13 months, month-ends after that,
+    always ending today. Cost basis is what is still held (same as 'invested' in
+    the portfolio totals), so the gap between the two lines is the unrealised gain.
+    """
+    today = today or date.today()
+    inputs = _inv_inputs(session)
+    firsts = [min(t.date for t in txns) for txns in inputs.values() if txns]
+    if not firsts:
+        return []
+    first = min(firsts)
+    prices = _price_series(session)
+
+    points: list[date] = []
+    if (today - first).days <= 400:
+        d = first
+        while d < today:
+            points.append(d)
+            d += timedelta(days=7)
+    else:
+        m = finance.month_key(first)
+        while finance.month_bounds(m)[1] < today:
+            points.append(finance.month_bounds(m)[1])
+            m = finance.shift_month(m, 1)
+    points.append(today)
+
+    out = []
+    for d in points:
+        invested = 0
+        for txns in inputs.values():
+            upto = [t for t in txns if t.date <= d]
+            if upto:
+                invested += finance.compute_holding(upto).invested
+        out.append({"date": d.isoformat(), "value": portfolio_value_at(d, inputs, prices), "invested": invested})
+    return out
+
+
 # --------------------------------------------------------------- months
+
+
+def daily_spend(session: Session, month: str, today: date | None = None) -> list[dict]:
+    """Cumulative spend by day-of-month for `month` and the month before it.
+
+    `current` is None for days that haven't happened yet, so the line stops at today.
+    Transfers are not spending and are excluded, like everywhere else.
+    """
+    today = today or date.today()
+
+    def cumulative(m: str) -> dict[int, int]:
+        ms, me = finance.month_bounds(m)
+        rows = session.execute(
+            select(Transaction.date, func.sum(Transaction.amount))
+            .where(Transaction.kind == "expense", Transaction.date >= ms, Transaction.date <= me)
+            .group_by(Transaction.date)
+        ).all()
+        per_day = {d.day: total for d, total in rows}
+        out, running = {}, 0
+        for day in range(1, me.day + 1):
+            running += per_day.get(day, 0)
+            out[day] = running
+        return out
+
+    cur, prev = cumulative(month), cumulative(finance.shift_month(month, -1))
+    last_real = today.day if finance.month_key(today) == month else (len(cur) if month < finance.month_key(today) else 0)
+    return [
+        {
+            "day": day,
+            "current": cur.get(day) if day <= last_real and day in cur else None,
+            "previous": prev.get(day),
+        }
+        for day in range(1, max(len(cur), len(prev)) + 1)
+    ]
 
 
 def _month_sums(session: Session, start: date, end: date) -> tuple[int, int]:
@@ -550,6 +623,7 @@ def dashboard(session: Session, month: str, today: date | None = None) -> dict:
         "invested": invested,
         "net_worth_trend": trend,
         "cash_flow": cash_flow,
+        "daily_spend": daily_spend(session, month, today),
         "spend_by_category": spend_cat,
         "top_transactions": top,
         "budgets": budget_month(session, month, today).model_dump(),

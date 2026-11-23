@@ -1,10 +1,11 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Archive, Loader2, Plus, RefreshCw, Search, Tag, Trash2, TrendingUp } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { Amount, Button, Card, Dialog, Empty, ErrorNote, Field, Input, PageHeader, Segmented, Select, Skeleton } from "../components/ui";
+import { CHART, Legend, PortfolioChart } from "../components/charts";
+import { Amount, Button, Card, CardHeader, Dialog, Empty, ErrorNote, Field, Input, PageHeader, Segmented, Select, Skeleton } from "../components/ui";
 import { api, type AmfiScheme, type Holding, type Instrument, type InstrumentKind, type InvTxn } from "../lib/api";
 import { money, pct, rupeesInput, shortDate, todayISO, toPaise } from "../lib/format";
-import { useAccounts, useInvalidateAll, usePortfolio } from "../lib/queries";
+import { useAccounts, useInvalidateAll, usePortfolio, usePortfolioHistory } from "../lib/queries";
 import { cn } from "../lib/utils";
 
 type Tab = "all" | InstrumentKind;
@@ -18,6 +19,7 @@ function dec(s: string | null, max = 4): string {
 
 export default function Investments() {
   const { data, error, isLoading } = usePortfolio();
+  const history = usePortfolioHistory();
   const [tab, setTab] = useState<Tab>("all");
   const [adding, setAdding] = useState(false);
   const [selected, setSelected] = useState<Holding | null>(null);
@@ -76,6 +78,17 @@ export default function Investments() {
           <span className={cn("font-mono tabular-nums", (totals?.xirr ?? 0) < 0 ? "text-expense" : "")}>{pct(totals?.xirr)}</span>
         </Kpi>
       </div>
+
+      {history.data && history.data.length >= 2 && (
+        <Card>
+          <CardHeader
+            title="Portfolio value vs invested"
+            right={<Legend items={[{ label: "Value", color: CHART.accent }, { label: "Invested", color: CHART.ref, dashed: true }]} />}
+          />
+          <PortfolioChart data={history.data} />
+          <p className="mt-2 text-xs text-faint">All holdings together. The gap between the lines is your unrealised gain; invested is the cost of what you still hold.</p>
+        </Card>
+      )}
 
       <Card className="p-0">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line p-3">

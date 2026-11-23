@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Copy, PiggyBank } from "lucide-react";
+import { CatBadge } from "../components/CatBadge";
 import { useState } from "react";
 import { Amount, Button, Card, CardHeader, Empty, ErrorNote, Input, PageHeader, Progress, Skeleton } from "../components/ui";
 import { api, type BudgetMonth, type BudgetRow } from "../lib/api";
@@ -106,13 +107,13 @@ function BudgetLine({ row, onSave, saving }: { row: BudgetRow; onSave: (paise: n
   return (
     <div className="grid grid-cols-[1fr_auto] items-center gap-x-4 gap-y-2 py-3 sm:grid-cols-[200px_1fr_auto]">
       <div className="flex items-center gap-2 text-sm">
-        <span className="h-2 w-2 rounded-full" style={{ background: row.color }} />
+        <CatBadge name={row.name} color={row.color} size="sm" />
         {row.name}
       </div>
       <div className="order-3 col-span-2 sm:order-none sm:col-span-1">
         {row.budget ? (
           <div className="flex items-center gap-3">
-            <Progress value={ratio} tone={ratio > 1 ? "over" : ratio > 0.85 ? "warn" : "default"} />
+            <Progress value={ratio} color={row.color} tone={ratio > 1 ? "over" : ratio > 0.85 ? "warn" : "default"} />
             <span className={cn("maskable w-40 shrink-0 text-right font-mono text-xs tabular-nums", ratio > 1 ? "text-expense" : "text-muted")}>
               {money(row.spent)} {ratio > 1 ? `· ${money(row.spent - row.budget)} over` : `· ${money(row.budget - row.spent)} left`}
             </span>

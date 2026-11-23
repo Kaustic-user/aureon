@@ -5,9 +5,11 @@ import {
   HardDrive,
   LayoutGrid,
   Menu,
+  Moon,
   PiggyBank,
   Plus,
   Search,
+  Sun,
   TrendingUp,
   Wallet,
   X,
@@ -16,6 +18,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation } from "react-router";
 import { useActions } from "../lib/actions";
 import { usePrivacy } from "../lib/privacy";
+import { useTheme } from "../lib/theme";
 import { cn } from "../lib/utils";
 import { Button } from "./ui";
 
@@ -38,7 +41,7 @@ const NAV: { group: string; items: { to: string; label: string; icon: ReactNode 
 function Logo() {
   return (
     <div className="flex items-center gap-2.5 px-2">
-      <div className="grid h-7 w-7 place-items-center rounded-md bg-zinc-50 text-sm font-bold text-zinc-950">A</div>
+      <div className="grid h-7 w-7 place-items-center rounded-md bg-gradient-to-br from-accent to-sky-500 text-sm font-bold text-[var(--color-on-accent)] shadow-sm">A</div>
       <span className="text-[15px] font-semibold tracking-tight">Aureon</span>
     </div>
   );
@@ -60,7 +63,7 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
                 className={({ isActive }) =>
                   cn(
                     "flex items-center gap-2.5 rounded-md border px-2 py-1.5 text-sm transition active:scale-[0.98]",
-                    isActive ? "border-line bg-hover text-zinc-50" : "border-transparent text-muted hover:bg-hover hover:text-zinc-100",
+                    isActive ? "border-accent/30 bg-accent/10 text-accent" : "border-transparent text-muted hover:bg-hover hover:text-zinc-100",
                   )
                 }
               >
@@ -89,6 +92,7 @@ function LocalBadge() {
 
 export function Layout() {
   const { masked, toggle } = usePrivacy();
+  const { theme, toggle: toggleTheme } = useTheme();
   const { openTxn, openQuick } = useActions();
   const [drawer, setDrawer] = useState(false);
   const loc = useLocation();
@@ -143,6 +147,9 @@ export function Layout() {
               <kbd className="ml-auto hidden rounded border border-line px-1.5 font-mono text-[10px] sm:inline">Ctrl K</kbd>
             </button>
             <div className="flex items-center gap-2 lg:ml-auto">
+              <Button size="icon" onClick={toggleTheme} aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} title={theme === "dark" ? "Light mode" : "Dark mode"}>
+                {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+              </Button>
               <Button size="icon" onClick={toggle} aria-label={masked ? "Show amounts" : "Hide amounts"} title={masked ? "Show amounts" : "Hide amounts"}>
                 {masked ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </Button>

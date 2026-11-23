@@ -4,9 +4,11 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes } from "react-router";
 import { Layout } from "./components/Layout";
 import { Empty } from "./components/ui";
+import "@fontsource-variable/inter";
 import "./index.css";
 import { ActionsProvider } from "./lib/actions";
 import { PrivacyProvider } from "./lib/privacy";
+import { ThemeProvider } from "./lib/theme";
 import Accounts from "./pages/Accounts";
 import Budgets from "./pages/Budgets";
 import Investments from "./pages/Investments";
@@ -22,6 +24,7 @@ const queryClient = new QueryClient({
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
+      <ThemeProvider>
       <PrivacyProvider>
         <BrowserRouter>
           <ActionsProvider>
@@ -38,6 +41,7 @@ createRoot(document.getElementById("root")!).render(
           </ActionsProvider>
         </BrowserRouter>
       </PrivacyProvider>
+      </ThemeProvider>
     </QueryClientProvider>
   </StrictMode>,
 );

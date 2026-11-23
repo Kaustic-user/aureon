@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { CatBadge } from "../components/CatBadge";
 import { ArrowLeftRight, Plus, Receipt, Search, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
@@ -179,9 +180,13 @@ export default function Transactions() {
                           onClick={() => openTxn(txnToDraft(t))}
                           className="flex w-full items-center gap-3 border-b border-line/50 px-4 py-2.5 text-left transition hover:bg-hover active:bg-zinc-800/60"
                         >
-                          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md text-xs font-semibold" style={{ background: color + "22", color }}>
-                            {t.kind === "transfer" ? <ArrowLeftRight className="h-3.5 w-3.5" /> : (c?.name ?? "?").charAt(0)}
-                          </span>
+                          {t.kind === "transfer" ? (
+                            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-hover text-faint">
+                              <ArrowLeftRight className="h-4 w-4" />
+                            </span>
+                          ) : (
+                            <CatBadge name={c?.name} color={color} />
+                          )}
                           <span className="min-w-0 flex-1">
                             <span className="block truncate text-sm">
                               {t.merchant ?? (t.kind === "transfer" ? "Transfer" : c?.name ?? "Untitled")}

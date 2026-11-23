@@ -160,6 +160,8 @@ export interface Dashboard {
   invested: number;
   net_worth_trend: { month: string; date: string; value: number }[];
   cash_flow: { month: string; income: number; spent: number; partial: boolean }[];
+  /** Cumulative spend per day of month; `current` is null for days not reached yet. */
+  daily_spend: { day: number; current: number | null; previous: number | null }[];
   spend_by_category: { category_id: number | null; name: string; color: string; amount: number }[];
   top_transactions: {
     id: number;
@@ -173,6 +175,13 @@ export interface Dashboard {
   budgets: BudgetMonth;
   upcoming: UpcomingItem[];
   portfolio: { totals: PortfolioTotals; by_kind: Partial<Record<InstrumentKind, PortfolioTotals>> };
+}
+
+/** Portfolio market value vs cost basis on one date. */
+export interface PortfolioPoint {
+  date: string;
+  value: number;
+  invested: number;
 }
 
 export class ApiError extends Error {

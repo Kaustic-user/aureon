@@ -163,5 +163,39 @@ def test_dashboard_numbers(client, bank, cats):
     assert d["net_worth_trend"][-1]["value"] == 160_000_00
 
 
+def test_daily_spend_is_cumulative_and_stops_today(client, bank, cats):
+    add_txn(client, kind="expense", amount=100_00, account_id=bank["id"], category_id=cats["Rent"]["id"])
+    add_txn(client, kind="expense", amount=50_00, account_id=bank["id"], category_id=cats["Rent"]["id"])
+    add_txn(client, kind="income", amount=999_00, account_id=bank["id"], category_id=cats["Salary"]["id"])
+    wallet = client.post("/api/accounts", json={"name": "W", "type": "wallet"}).json()
+    add_txn(client, kind="transfer", amount=70_00, account_id=bank["id"], to_account_id=wallet["id"])
+
+    days = client.get("/api/dashboard", params={"month": MONTH}).json()["daily_spend"]
+    by_day = {d["day"]: d for d in days}
+    assert by_day[TODAY.day]["current"] == 150_00  # income and transfers are not spend
+    assert by_day[1]["current"] in (0, 150_00)
+    assert all(d["current"] is None for d in days if d["day"] > TODAY.day)
+    cur = [d["current"] for d in days if d["current"] is not None]
+    assert cur == sorted(cur)  # cumulative never goes down
+
+
+def test_portfolio_history_value_vs_cost(client, bank):
+    assert client.get("/api/investments/history").json() == []
+    fund = client.post(
+        "/api/investments/instruments", json={"kind": "mutual_fund", "name": "Fund", "symbol": "1"}
+    ).json()
+    start = TODAY - timedelta(days=30)
+    client.post(
+        "/api/investments/txns",
+        json={"instrument_id": fund["id"], "account_id": bank["id"], "date": start.isoformat(),
+              "type": "buy", "units": "1000", "price": "10", "amount": 10_000_00},
+    )
+    client.post("/api/investments/prices", json={"instrument_id": fund["id"], "date": TODAY.isoformat(), "price": "12"})
+    h = client.get("/api/investments/history").json()
+    assert h[0]["date"] == start.isoformat() and h[-1]["date"] == TODAY.isoformat()
+    assert all(p["invested"] == 10_000_00 for p in h)
+    assert h[-1]["value"] == 12_000_00
+
+
 def test_bad_month_is_422(client):
     assert client.get("/api/dashboard", params={"month": "2026-13"}).status_code == 422

@@ -40,6 +40,12 @@ def get_portfolio(session: Session = DB):
     return services.portfolio(session)
 
 
+@router.get("/history")
+def get_history(session: Session = DB):
+    """Portfolio value and cost basis over time (for the value-vs-invested chart)."""
+    return services.portfolio_history(session)
+
+
 # --------------------------------------------------------------- instruments
 
 

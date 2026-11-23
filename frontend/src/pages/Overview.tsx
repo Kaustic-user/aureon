@@ -1,6 +1,7 @@
-import { ArrowRight, CalendarClock, ChevronLeft, ChevronRight, Repeat } from "lucide-react";
+import { ArrowDownLeft, ArrowRight, ArrowUpRight, CalendarClock, ChevronLeft, ChevronRight, Landmark, PiggyBank, Repeat } from "lucide-react";
 import { Link } from "react-router";
-import { CashFlowChart, CHART, Legend, NetWorthChart } from "../components/charts";
+import { CatBadge } from "../components/CatBadge";
+import { CashFlowChart, CHART, Legend, NetWorthChart, PaceChart, SavingsBars } from "../components/charts";
 import { Amount, Card, CardHeader, Delta, Empty, ErrorNote, PageHeader, Progress, Skeleton, Button } from "../components/ui";
 import type { Dashboard } from "../lib/api";
 import { useActions } from "../lib/actions";
@@ -26,10 +27,13 @@ export function MonthPicker({ month, onChange }: { month: string; onChange: (m: 
   );
 }
 
-function Kpi({ label, children, caption }: { label: string; children: React.ReactNode; caption: React.ReactNode }) {
+function Kpi({ label, children, caption, tone, icon }: { label: string; children: React.ReactNode; caption: React.ReactNode; tone: string; icon: React.ReactNode }) {
   return (
     <Card className="transition hover:border-zinc-700 hover:bg-hover">
-      <div className="text-sm text-muted">{label}</div>
+      <div className="flex items-center gap-2 text-sm text-muted">
+        <span className="grid h-6 w-6 place-items-center rounded-md" style={{ background: `color-mix(in oklab, ${tone} 16%, transparent)`, color: tone }}>{icon}</span>
+        {label}
+      </div>
       <div className="mt-2 text-2xl font-bold">{children}</div>
       <div className="mt-2 flex min-h-5 flex-wrap items-center gap-1.5 text-xs text-faint">{caption}</div>
     </Card>
@@ -74,20 +78,27 @@ function Blocks({ d }: { d: Dashboard }) {
   const maxCat = d.spend_by_category[0]?.amount ?? 1;
   const budgetRows = d.budgets.rows.filter((r) => r.budget).sort((a, b) => b.spent / b.budget! - a.spent / a.budget!);
 
+  // Pace: compare spend so far with where last month stood on the same day.
+  const reached = d.daily_spend.filter((p) => p.current != null);
+  const lastDay = reached[reached.length - 1];
+  const paceDiff = lastDay && lastDay.previous != null ? lastDay.current! - lastDay.previous : null;
+
   return (
     <>
       {/* KPI ribbon */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Kpi label="Net worth" caption={<><Delta value={d.net_worth.change_3m_pct} /> <span>last 3 months</span></>}>
+        <Kpi tone="var(--color-accent)" icon={<Landmark className="h-3.5 w-3.5" />} label="Net worth" caption={<><Delta value={d.net_worth.change_3m_pct} /> <span>last 3 months</span></>}>
           <Amount value={d.net_worth.value} className="font-bold" />
         </Kpi>
-        <Kpi label="Income" caption={<span className="maskable truncate">{split || "No income recorded"}</span>}>
+        <Kpi tone="var(--color-income)" icon={<ArrowDownLeft className="h-3.5 w-3.5" />} label="Income" caption={<span className="maskable truncate">{split || "No income recorded"}</span>}>
           <Amount value={d.income.total} kind="income" className="font-bold" />
         </Kpi>
-        <Kpi label="Spent" caption={d.spent.previous ? <><Delta value={d.spent.change_pct} invert /> <span>vs {prevLabel}</span></> : <span>No spend last month</span>}>
+        <Kpi tone="var(--color-expense)" icon={<ArrowUpRight className="h-3.5 w-3.5" />} label="Spent" caption={d.spent.previous ? <><Delta value={d.spent.change_pct} invert /> <span>vs {prevLabel}</span></> : <span>No spend last month</span>}>
           <Amount value={d.spent.total} kind="expense" className="font-bold" />
         </Kpi>
         <Kpi
+          tone="#8b5cf6"
+          icon={<PiggyBank className="h-3.5 w-3.5" />}
           label="Savings rate"
           caption={<span><span className="maskable font-mono">{money(d.savings.amount)}</span> saved{d.invested ? <> · <span className="maskable font-mono">{money(d.invested)}</span> invested</> : null}</span>}
         >
@@ -99,7 +110,13 @@ function Blocks({ d }: { d: Dashboard }) {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader title="Net worth trend" right={<Legend items={[{ label: "Net worth", color: CHART.accent }]} />} />
-          {d.net_worth_trend.length > 1 ? <NetWorthChart data={d.net_worth_trend} /> : <Empty title="Trend appears after your first full month" />}
+          {d.net_worth_trend.length >= 3 ? (
+            <NetWorthChart data={d.net_worth_trend} />
+          ) : (
+            <Empty title="The trend chart appears after 3 months of data">
+              {d.net_worth_trend.length} month{d.net_worth_trend.length === 1 ? "" : "s"} recorded so far. Until then, your net worth is the figure above.
+            </Empty>
+          )}
         </Card>
         <Card>
           <CardHeader title="Upcoming" right={<span className="flex items-center gap-1"><Repeat className="h-3 w-3" /> next 30 days</span>} />
@@ -122,7 +139,7 @@ function Blocks({ d }: { d: Dashboard }) {
         </Card>
       </div>
 
-      {/* Cash flow + budgets */}
+      {/* Cash flow + spending pace */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <Card>
           <CardHeader title="Cash flow · last 6 months" right={<Legend items={[{ label: "Income", color: CHART.income }, { label: "Spend", color: CHART.spend }]} />} />
@@ -130,20 +147,77 @@ function Blocks({ d }: { d: Dashboard }) {
           {d.cash_flow.some((c) => c.partial) && <p className="mt-2 text-xs text-faint">* month to date</p>}
         </Card>
         <Card>
-          <CardHeader title={`Budgets · ${monthLabel(d.month, "short")}`} right={<Link to={`/budgets?month=${d.month}`} className="hover:text-zinc-200">Manage</Link>} />
+          <CardHeader
+            title="Spending pace"
+            right={
+              <Legend
+                items={[
+                  { label: monthLabel(d.month, "short"), color: CHART.accent },
+                  { label: monthLabel(shiftMonth(d.month, -1), "short"), color: CHART.ref, dashed: true },
+                ]}
+              />
+            }
+          />
+          {d.spent.total > 0 || d.spent.previous > 0 ? (
+            <>
+              <PaceChart data={d.daily_spend} month={d.month} />
+              {paceDiff != null && (
+                <p className="mt-2 text-xs text-faint">
+                  By day {lastDay!.day} you've spent{" "}
+                  <span className={cn("maskable font-mono", paceDiff > 0 ? "text-expense" : "text-income")}>{money(Math.abs(paceDiff))}</span>{" "}
+                  {paceDiff > 0 ? "more" : "less"} than at the same point in {prevLabel}.
+                </p>
+              )}
+            </>
+          ) : (
+            <Empty title="No spending to compare yet" />
+          )}
+        </Card>
+      </div>
+
+      {/* Category + budgets */}
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <Card>
+          <CardHeader title="Spend by category" right={<span className="maskable font-mono">{money(spendTotal)} total</span>} />
+          {d.spend_by_category.length ? (
+            <div className="space-y-3.5">
+              {d.spend_by_category.slice(0, 8).map((c) => (
+                <Link key={c.name} to={`/transactions?month=${d.month}${c.category_id ? `&category_id=${c.category_id}` : ""}`} className="group block">
+                  <div className="mb-1.5 flex items-center justify-between text-sm">
+                    <span className="flex items-center gap-2 group-hover:text-zinc-50">
+                      <CatBadge name={c.name} color={c.color} size="sm" />
+                      {c.name}
+                    </span>
+                    <span className="flex items-baseline gap-2">
+                      <span className="text-xs text-faint">{pct(c.amount / spendTotal, 0)}</span>
+                      <Amount value={c.amount} className="text-sm" />
+                    </span>
+                  </div>
+                  <div className="h-1.5 overflow-hidden rounded-full bg-zinc-800">
+                    <div className="h-full rounded-full opacity-90 transition group-hover:opacity-100" style={{ width: `${(c.amount / maxCat) * 100}%`, background: c.color }} />
+                  </div>
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <Empty title="No spending this month" />
+          )}
+        </Card>
+        <Card>
+          <CardHeader title={`Budgets · ${monthLabel(d.month, "short")}`} right={<Link to={`/budgets?month=${d.month}`} className="hover:text-zinc-200">{budgetRows.length > 3 ? `All ${budgetRows.length}` : "Manage"}</Link>} />
           {budgetRows.length ? (
             <div className="space-y-3.5">
-              {budgetRows.slice(0, 5).map((r) => {
+              {budgetRows.slice(0, 3).map((r) => {
                 const ratio = r.spent / r.budget!;
                 return (
                   <div key={r.category_id}>
                     <div className="mb-1.5 flex items-center justify-between text-sm">
-                      <span>{r.name}</span>
+                      <span className="flex items-center gap-2"><CatBadge name={r.name} color={r.color} size="sm" />{r.name}</span>
                       <span className={cn("maskable font-mono text-xs tabular-nums", ratio > 1 ? "text-expense" : "text-muted")}>
                         {money(r.spent)} / {money(r.budget!)}
                       </span>
                     </div>
-                    <Progress value={ratio} tone={ratio > 1 ? "over" : ratio > 0.85 ? "warn" : "default"} />
+                    <Progress value={ratio} color={r.color} tone={ratio > 1 ? "over" : ratio > 0.85 ? "warn" : "default"} />
                   </div>
                 );
               })}
@@ -162,34 +236,8 @@ function Blocks({ d }: { d: Dashboard }) {
         </Card>
       </div>
 
-      {/* Category + top 10 */}
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <Card>
-          <CardHeader title="Spend by category" right={<span className="maskable font-mono">{money(spendTotal)} total</span>} />
-          {d.spend_by_category.length ? (
-            <div className="space-y-3.5">
-              {d.spend_by_category.slice(0, 8).map((c) => (
-                <Link key={c.name} to={`/transactions?month=${d.month}${c.category_id ? `&category_id=${c.category_id}` : ""}`} className="group block">
-                  <div className="mb-1.5 flex items-center justify-between text-sm">
-                    <span className="flex items-center gap-2 group-hover:text-zinc-50">
-                      <span className="h-2 w-2 rounded-full" style={{ background: c.color }} />
-                      {c.name}
-                    </span>
-                    <span className="flex items-baseline gap-2">
-                      <span className="text-xs text-faint">{pct(c.amount / spendTotal, 0)}</span>
-                      <Amount value={c.amount} className="text-sm" />
-                    </span>
-                  </div>
-                  <div className="h-1.5 overflow-hidden rounded-full bg-zinc-800">
-                    <div className="h-full rounded-full bg-zinc-300 transition group-hover:bg-zinc-100" style={{ width: `${(c.amount / maxCat) * 100}%` }} />
-                  </div>
-                </Link>
-              ))}
-            </div>
-          ) : (
-            <Empty title="No spending this month" />
-          )}
-        </Card>
+      {/* Top 10 + portfolio & savings */}
+      <div className="grid grid-cols-1 items-start gap-4 md:grid-cols-2">
         <Card className="overflow-hidden">
           <CardHeader title="Top 10 transactions" right={<Link to={`/transactions?month=${d.month}`} className="hover:text-zinc-200">View all</Link>} />
           {d.top_transactions.length ? (
@@ -222,10 +270,7 @@ function Blocks({ d }: { d: Dashboard }) {
             <Empty title="No transactions this month" />
           )}
         </Card>
-      </div>
-
-      {/* Portfolio + savings */}
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="space-y-4">
         <Card>
           <CardHeader title="Portfolio" right={<Link to="/investments" className="flex items-center gap-1 hover:text-zinc-200">Investments <ArrowRight className="h-3 w-3" /></Link>} />
           {pf.invested > 0 || pf.value > 0 ? (
@@ -263,15 +308,15 @@ function Blocks({ d }: { d: Dashboard }) {
           )}
         </Card>
         <Card>
-          <CardHeader title="Savings this month" right={<span>{d.income.total ? `${pct(d.savings.rate, 0)} of income` : ""}</span>} />
-          <Amount value={d.savings.amount} kind={d.savings.amount >= 0 ? "income" : "expense"} className="text-2xl font-bold" />
-          <Progress className="mt-4 h-2" value={Math.max(0, d.savings.rate ?? 0)} tone="good" />
-          <div className="mt-4 grid grid-cols-3 gap-3 text-xs">
+          <CardHeader title="Savings by month" right={<span>{d.income.total ? `${pct(d.savings.rate, 0)} of income this month` : ""}</span>} />
+          <SavingsBars data={d.cash_flow} />
+          <div className="mt-3 grid grid-cols-3 gap-3 text-xs">
             <Mini label="Earned" value={d.income.total} />
             <Mini label="Spent" value={d.spent.total} />
             <Mini label="Invested" value={d.invested} />
           </div>
         </Card>
+        </div>
       </div>
     </>
   );

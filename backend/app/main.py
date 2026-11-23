@@ -55,5 +55,4 @@ def create_app(db_path: Path | None = None, allowed_hosts: list[str] | None = No
             if full_path and candidate.is_file() and dist.resolve() in candidate.parents:
                 return FileResponse(candidate)
             return FileResponse(dist / "index.html")
-
     return app

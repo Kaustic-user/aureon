@@ -29,7 +29,7 @@ export function CardHeader({ title, right, className }: { title: ReactNode; righ
 
 type Variant = "primary" | "secondary" | "ghost" | "danger";
 const variants: Record<Variant, string> = {
-  primary: "bg-zinc-50 text-zinc-950 hover:bg-zinc-200 border-transparent",
+  primary: "bg-accent text-[var(--color-on-accent)] hover:brightness-110 border-transparent",
   secondary: "bg-transparent text-zinc-100 border-line hover:bg-hover",
   ghost: "bg-transparent text-muted border-transparent hover:bg-hover hover:text-zinc-100",
   danger: "bg-transparent text-expense border-line hover:bg-red-500/10",
@@ -107,7 +107,7 @@ export function Segmented<T extends string>({
           onClick={() => onChange(o.value)}
           className={cn(
             "h-7 rounded px-3 text-xs font-medium transition",
-            value === o.value ? "bg-hover text-zinc-50 shadow-[inset_0_0_0_1px_#3f3f46]" : "text-muted hover:text-zinc-200",
+            value === o.value ? "bg-hover text-zinc-50 shadow-[inset_0_0_0_1px_var(--color-zinc-700)]" : "text-muted hover:text-zinc-200",
           )}
         >
           {o.label}
@@ -210,11 +210,12 @@ export function Delta({ value, suffix, invert }: { value: number | null | undefi
   );
 }
 
-export function Progress({ value, tone = "default", className }: { value: number; tone?: "default" | "warn" | "over" | "good"; className?: string }) {
-  const color = { default: "bg-zinc-200", warn: "bg-warn", over: "bg-expense", good: "bg-income" }[tone];
+/** `color` tints the bar in the default tone (e.g. a category colour); warn/over keep their status colours. */
+export function Progress({ value, tone = "default", color, className }: { value: number; tone?: "default" | "warn" | "over" | "good"; color?: string; className?: string }) {
+  const toneClass = { default: "bg-accent", warn: "bg-warn", over: "bg-expense", good: "bg-income" }[tone];
   return (
     <div className={cn("h-1.5 w-full overflow-hidden rounded-full bg-zinc-800", className)}>
-      <div className={cn("h-full rounded-full transition-[width] duration-500", color)} style={{ width: `${Math.min(100, Math.max(0, value * 100))}%` }} />
+      <div className={cn("h-full rounded-full transition-[width] duration-500", toneClass)} style={{ width: `${Math.min(100, Math.max(0, value * 100))}%`, ...(tone === "default" && color ? { background: color } : {}) }} />
     </div>
   );
 }
