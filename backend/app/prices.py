@@ -74,7 +74,14 @@ _lock = threading.Lock()
 
 
 def fetch_text(url: str = AMFI_URL, timeout: int = 60) -> str:
-    ctx = ssl.create_default_context(cafile=config.ca_bundle())
+    ca = config.ca_bundle()
+    if not ca:
+        try:
+            import certifi
+            ca = certifi.where()
+        except ImportError:
+            pass
+    ctx = ssl.create_default_context(cafile=ca)
     req = urllib.request.Request(url, headers={"User-Agent": "Aureon/0.1 (personal finance, local)"})
     with urllib.request.urlopen(req, context=ctx, timeout=timeout) as resp:
         return resp.read().decode("utf-8", errors="replace")
