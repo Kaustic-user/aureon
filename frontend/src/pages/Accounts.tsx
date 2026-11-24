@@ -1,6 +1,7 @@
 import { useMutation } from "@tanstack/react-query";
 import { Archive, ArchiveRestore, Banknote, CreditCard, Landmark, LineChart, Pencil, Plus, Repeat, Smartphone, Trash2, Wallet } from "lucide-react";
 import { useState, type FormEvent, type ReactNode } from "react";
+import { DateField } from "../components/Calendar";
 import { CategoryOptions } from "../components/TxnDialog";
 import { Amount, Button, Card, CardHeader, Dialog, Empty, ErrorNote, Field, Input, PageHeader, Segmented, Select, Skeleton } from "../components/ui";
 import { api, type Account, type AccountType, type Recurring } from "../lib/api";
@@ -388,7 +389,7 @@ function RecurringDialog({ rule, onClose }: { rule: Recurring | "new" | null; on
             </Select>
           </Field>
           <Field label="Next date">
-            <Input type="date" value={form.next_date} onChange={(e) => set("next_date", e.target.value)} required />
+            <DateField value={form.next_date} onChange={(d) => set("next_date", d)} align="right" />
           </Field>
         </div>
         <label className="flex items-center gap-2 text-sm text-muted">

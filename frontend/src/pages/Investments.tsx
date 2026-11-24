@@ -2,6 +2,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Archive, Loader2, Plus, RefreshCw, Search, Tag, Trash2, TrendingUp } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { CHART, Legend, PortfolioChart } from "../components/charts";
+import { DateField } from "../components/Calendar";
 import { Amount, Button, Card, CardHeader, Dialog, Empty, ErrorNote, Field, Input, PageHeader, Segmented, Select, Skeleton } from "../components/ui";
 import { api, type AmfiScheme, type Holding, type Instrument, type InstrumentKind, type InvTxn } from "../lib/api";
 import { money, pct, rupeesInput, shortDate, todayISO, toPaise } from "../lib/format";
@@ -380,7 +381,7 @@ function HoldingDialog({ holding, onClose }: { holding: Holding | null; onClose:
             </div>
             <form className="flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); if (Number(priceVal.replace(/,/g, "")) > 0) setPrice.mutate(); }}>
               <Input value={priceVal} onChange={(e) => setPriceVal(e.target.value)} inputMode="decimal" placeholder={inst.kind === "stock" ? "Last traded price" : "NAV"} className="w-40 font-mono" />
-              <Input type="date" value={priceDate} onChange={(e) => setPriceDate(e.target.value)} className="w-40" />
+              <DateField value={priceDate} onChange={setPriceDate} className="w-44" />
               <Button type="submit" disabled={setPrice.isPending}>Set price</Button>
             </form>
             <ErrorNote error={setPrice.error} />
@@ -486,7 +487,7 @@ function InvTxnForm({ inst, txn, onDone, onCancel }: { inst: Instrument; txn: In
     <form onSubmit={submit} className="mb-3 space-y-3 rounded-md border border-zinc-700 bg-bg p-3">
       <Segmented value={type} onChange={setType} options={[{ value: "buy", label: "Buy" }, { value: "sell", label: "Sell" }, { value: "dividend", label: "Dividend" }]} />
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Field label="Date"><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} required /></Field>
+        <Field label="Date"><DateField value={date} onChange={setDate} /></Field>
         {type !== "dividend" && (
           <>
             <Field label="Units"><Input value={units} onChange={(e) => setUnits(e.target.value)} inputMode="decimal" className="font-mono" required /></Field>

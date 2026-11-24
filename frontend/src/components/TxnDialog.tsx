@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { Category, Txn, TxnIn, TxnKind } from "../lib/api";
 import { rupeesInput, todayISO, toPaise } from "../lib/format";
 import { useAccounts, useCategories, useDeleteTxn, useSaveTxn } from "../lib/queries";
+import { DateField } from "./Calendar";
 import { Button, Dialog, ErrorNote, Field, Input, Segmented, Select } from "./ui";
 
 export type TxnDraft = Partial<TxnIn> & { id?: number };
@@ -151,7 +152,7 @@ export function TxnDialog({ open, draft, onClose }: { open: boolean; draft: TxnD
             />
           </Field>
           <Field label="Date">
-            <Input type="date" value={date} max="2100-12-31" onChange={(e) => setDate(e.target.value)} required />
+            <DateField value={date} onChange={setDate} align="right" />
           </Field>
         </div>
         <div className="grid grid-cols-2 gap-3">

@@ -1,5 +1,6 @@
-import { ArrowDownLeft, ArrowRight, ArrowUpRight, CalendarClock, ChevronLeft, ChevronRight, Landmark, PiggyBank, Repeat } from "lucide-react";
+import { ArrowDownLeft, ArrowRight, ArrowUpRight, CalendarClock, CalendarDays, ChevronLeft, ChevronRight, Landmark, PiggyBank, Repeat } from "lucide-react";
 import { Link } from "react-router";
+import { MonthGrid, POPOVER, usePopover } from "../components/Calendar";
 import { CatBadge } from "../components/CatBadge";
 import { CashFlowChart, CHART, Legend, NetWorthChart, PaceChart, SavingsBars } from "../components/charts";
 import { Amount, Card, CardHeader, Delta, Empty, ErrorNote, PageHeader, Progress, Skeleton, Button } from "../components/ui";
@@ -12,17 +13,50 @@ import { cn } from "../lib/utils";
 
 export function MonthPicker({ month, onChange }: { month: string; onChange: (m: string) => void }) {
   const isCurrent = month >= currentMonth();
+  const { open, setOpen, box } = usePopover();
   return (
-    <div className="flex items-center rounded-md border border-line">
-      <Button variant="ghost" size="icon" className="h-9 w-9 rounded-r-none" onClick={() => onChange(shiftMonth(month, -1))} aria-label="Previous month">
-        <ChevronLeft className="h-4 w-4" />
-      </Button>
-      <button className="h-9 min-w-32 border-x border-line px-3 text-sm hover:bg-hover" onClick={() => onChange(currentMonth())} title="Jump to this month">
-        {isCurrent && month === currentMonth() ? "This month" : monthLabel(month)}
-      </button>
-      <Button variant="ghost" size="icon" className="h-9 w-9 rounded-l-none" onClick={() => onChange(shiftMonth(month, 1))} disabled={isCurrent} aria-label="Next month">
-        <ChevronRight className="h-4 w-4" />
-      </Button>
+    <div ref={box} className="relative">
+      <div className="flex items-center rounded-md border border-line">
+        <Button variant="ghost" size="icon" className="h-9 w-9 rounded-r-none" onClick={() => onChange(shiftMonth(month, -1))} aria-label="Previous month">
+          <ChevronLeft className="h-4 w-4" />
+        </Button>
+        <button
+          className="flex h-9 min-w-32 items-center justify-center gap-2 border-x border-line px-3 text-sm hover:bg-hover"
+          onClick={() => setOpen(!open)}
+          aria-expanded={open}
+          title="Pick month and year"
+        >
+          <CalendarDays className="h-3.5 w-3.5 text-muted" />
+          {month === currentMonth() ? "This month" : monthLabel(month)}
+        </button>
+        <Button variant="ghost" size="icon" className="h-9 w-9 rounded-l-none" onClick={() => onChange(shiftMonth(month, 1))} disabled={isCurrent} aria-label="Next month">
+          <ChevronRight className="h-4 w-4" />
+        </Button>
+      </div>
+      {open && (
+        <div className={`absolute right-0 ${POPOVER}`}>
+          <MonthGrid
+            value={month}
+            max={currentMonth()}
+            onPick={(m) => {
+              onChange(m);
+              setOpen(false);
+            }}
+          />
+          <div className="mt-2 border-t border-line pt-2">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                onChange(currentMonth());
+                setOpen(false);
+              }}
+            >
+              This month
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
