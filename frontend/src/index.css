@@ -107,6 +107,27 @@ html.light textarea {
   color-scheme: light;
 }
 
+select option,
+select optgroup {
+  background-color: var(--color-card);
+  color: var(--color-fg);
+  font-family: inherit;
+  font-size: 14px;
+}
+
+select option:disabled {
+  color: var(--color-faint);
+}
+
+select optgroup {
+  color: var(--color-muted);
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding-top: 6px;
+}
+
 .scrollbar-thin {
   scrollbar-width: thin;
   scrollbar-color: var(--color-line) transparent;

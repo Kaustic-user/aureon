@@ -4,7 +4,8 @@ import { ArrowLeftRight, Plus, Receipt, Search, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router";
 import { RangePicker } from "../components/RangePicker";
-import { CategoryOptions, txnToDraft } from "../components/TxnDialog";
+import { CategorySelect } from "../components/CategorySelect";
+import { txnToDraft } from "../components/TxnDialog";
 import { Amount, Button, Card, Empty, ErrorNote, Input, PageHeader, Segmented, Select, Skeleton } from "../components/ui";
 import { useActions } from "../lib/actions";
 import { api, type Txn, type TxnPage } from "../lib/api";
@@ -121,11 +122,13 @@ export default function Transactions() {
             <option key={a.id} value={a.id}>{a.name}</option>
           ))}
         </Select>
-        <Select value={categoryId} onChange={(e) => setParam("category_id", e.target.value)} className="w-auto max-w-52">
-          <option value="">All categories</option>
-          <CategoryOptions cats={cats} kind="expense" />
-          <CategoryOptions cats={cats} kind="income" />
-        </Select>
+        <CategorySelect
+          value={categoryId}
+          onChange={(id) => setParam("category_id", id)}
+          cats={cats}
+          placeholder="All categories"
+          className="w-auto min-w-[160px] max-w-56"
+        />
         {filtered && (
           <Button
             variant="ghost"

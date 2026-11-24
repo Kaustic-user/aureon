@@ -5,7 +5,8 @@ export const useAccounts = () => useQuery({ queryKey: ["accounts"], queryFn: () 
 export const useCategories = () => useQuery({ queryKey: ["categories"], queryFn: () => api.get<Category[]>("/categories") });
 export const useDashboard = (month: string) =>
   useQuery({ queryKey: ["dashboard", month], queryFn: () => api.get<Dashboard>("/dashboard", { month }), placeholderData: (p) => p });
-export const usePortfolio = () => useQuery({ queryKey: ["portfolio"], queryFn: () => api.get<Portfolio>("/investments/portfolio") });
+export const usePortfolio = (includeArchived: boolean = true) =>
+  useQuery({ queryKey: ["portfolio", includeArchived], queryFn: () => api.get<Portfolio>("/investments/portfolio", { include_archived: includeArchived }) });
 export const usePortfolioHistory = () =>
   useQuery({ queryKey: ["portfolio-history"], queryFn: () => api.get<PortfolioPoint[]>("/investments/history") });
 export const useInstruments = () => useQuery({ queryKey: ["instruments"], queryFn: () => api.get<Instrument[]>("/investments/instruments") });

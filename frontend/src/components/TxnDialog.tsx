@@ -4,6 +4,7 @@ import type { Category, Txn, TxnIn, TxnKind } from "../lib/api";
 import { rupeesInput, todayISO, toPaise } from "../lib/format";
 import { useAccounts, useCategories, useDeleteTxn, useSaveTxn } from "../lib/queries";
 import { DateField } from "./Calendar";
+import { CategorySelect } from "./CategorySelect";
 import { Button, Dialog, ErrorNote, Field, Input, Segmented, Select } from "./ui";
 
 export type TxnDraft = Partial<TxnIn> & { id?: number };
@@ -180,10 +181,7 @@ export function TxnDialog({ open, draft, onClose }: { open: boolean; draft: TxnD
             </Field>
           ) : (
             <Field label="Category">
-              <Select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>
-                <option value="">Uncategorised</option>
-                <CategoryOptions cats={cats} kind={kind} />
-              </Select>
+              <CategorySelect value={categoryId} onChange={setCategoryId} cats={cats} kind={kind} placeholder="Uncategorised" />
             </Field>
           )}
         </div>

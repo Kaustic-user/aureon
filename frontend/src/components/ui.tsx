@@ -1,12 +1,18 @@
 // Small shadcn-style primitives, hand-written so there is no generator step.
-import { X } from "lucide-react";
+import { Check, ChevronDown, Search, X } from "lucide-react";
 import {
+  Children,
   forwardRef,
+  isValidElement,
   useEffect,
+  useMemo,
   useRef,
+  useState,
   type ButtonHTMLAttributes,
+  type ChangeEvent,
   type HTMLAttributes,
   type InputHTMLAttributes,
+  type ReactElement,
   type ReactNode,
   type SelectHTMLAttributes,
 } from "react";
@@ -66,13 +72,211 @@ export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputE
   return <input ref={ref} className={cn(field, className)} {...p} />;
 });
 
-export function Select({ className, children, ...p }: SelectHTMLAttributes<HTMLSelectElement>) {
-  return (
-    <select className={cn(field, "cursor-pointer pr-8", className)} {...p}>
-      {children}
-    </select>
-  );
+interface ParsedOption {
+  value: string;
+  label: ReactNode;
+  disabled?: boolean;
 }
+
+function extractOptions(children: ReactNode): ParsedOption[] {
+  const result: ParsedOption[] = [];
+  Children.forEach(children, (child) => {
+    if (!isValidElement(child)) return;
+    const elem = child as ReactElement<any>;
+    if (elem.type === "option") {
+      result.push({
+        value: String(elem.props.value ?? ""),
+        label: elem.props.children ?? elem.props.value,
+        disabled: elem.props.disabled,
+      });
+    } else if (elem.type === "optgroup") {
+      Children.forEach(elem.props.children, (opt) => {
+        if (!isValidElement(opt)) return;
+        const o = opt as ReactElement<any>;
+        result.push({
+          value: String(o.props.value ?? ""),
+          label: o.props.children ?? o.props.value,
+          disabled: o.props.disabled,
+        });
+      });
+    }
+  });
+  return result;
+}
+
+export interface SelectProps extends Omit<SelectHTMLAttributes<HTMLSelectElement>, "value" | "onChange" | "placeholder"> {
+  value?: string | number;
+  onChange?: (e: ChangeEvent<HTMLSelectElement>) => void;
+  options?: { value: string; label: ReactNode; disabled?: boolean }[];
+  searchable?: boolean;
+  placeholder?: string;
+}
+
+export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select(
+  {
+    value,
+    onChange,
+    children,
+    options: directOptions,
+    className,
+    disabled = false,
+    placeholder = "Select…",
+    searchable,
+    name,
+  },
+  ref,
+) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const box = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  const options = useMemo(() => {
+    if (directOptions) return directOptions;
+    return extractOptions(children);
+  }, [directOptions, children]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!box.current?.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const showSearch = searchable ?? options.length > 7;
+
+  useEffect(() => {
+    if (open) {
+      setQuery("");
+      if (showSearch) {
+        setTimeout(() => searchRef.current?.focus(), 25);
+      }
+    }
+  }, [open, showSearch]);
+
+  const selectedOpt = useMemo(() => {
+    return options.find((o) => String(o.value) === String(value ?? "")) ?? null;
+  }, [options, value]);
+
+  const filteredOptions = useMemo(() => {
+    if (!query.trim()) return options;
+    const q = query.trim().toLowerCase();
+    return options.filter((o) => {
+      const text = typeof o.label === "string" ? o.label : String(o.value);
+      return text.toLowerCase().includes(q);
+    });
+  }, [options, query]);
+
+  const handleSelect = (optVal: string) => {
+    if (onChange) {
+      const syntheticEvent = {
+        target: { value: optVal, name: name ?? "" },
+        currentTarget: { value: optVal, name: name ?? "" },
+      } as ChangeEvent<HTMLSelectElement>;
+      onChange(syntheticEvent);
+    }
+    setOpen(false);
+  };
+
+  const isAuto = className?.includes("w-auto");
+
+  return (
+    <div ref={box} className={cn("relative inline-block", isAuto ? "w-auto min-w-[130px]" : className?.includes("w-") ? className : "w-full")}>
+      <button
+        ref={ref}
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen(!open)}
+        className={cn(
+          field,
+          "cursor-pointer pr-8 font-normal shadow-2xs transition flex items-center justify-between text-left",
+          "hover:border-zinc-700 hover:bg-hover/30",
+          open && "border-accent ring-1 ring-accent/40",
+          disabled && "cursor-not-allowed opacity-50",
+          className
+        )}
+      >
+        <span className="truncate text-zinc-100 font-medium">
+          {selectedOpt ? selectedOpt.label : <span className="text-faint">{placeholder}</span>}
+        </span>
+        <ChevronDown
+          className={cn(
+            "pointer-events-none h-4 w-4 shrink-0 text-muted transition-transform duration-200",
+            open && "rotate-180 text-accent"
+          )}
+        />
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-full mt-1.5 z-50 w-full min-w-[180px] max-w-sm rounded-lg border border-line bg-card p-1 shadow-2xl shadow-black/80">
+          {showSearch && (
+            <div className="relative mb-1 px-1 pt-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-faint" />
+              <input
+                ref={searchRef}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search…"
+                className="h-8 w-full rounded border border-line bg-bg pl-8 pr-7 text-xs text-zinc-100 placeholder:text-faint outline-none focus:border-accent"
+              />
+              {query && (
+                <button
+                  type="button"
+                  onClick={() => setQuery("")}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-faint hover:text-zinc-200 cursor-pointer"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+          )}
+
+          <div className="max-h-56 overflow-y-auto scrollbar-thin divide-y divide-line/40 p-0.5">
+            {filteredOptions.length === 0 ? (
+              <div className="py-3 text-center text-xs text-faint">No options found</div>
+            ) : (
+              filteredOptions.map((opt) => {
+                const isSelected = String(opt.value) === String(value ?? "");
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    disabled={opt.disabled}
+                    onClick={() => handleSelect(opt.value)}
+                    className={cn(
+                      "flex w-full items-center justify-between rounded px-2.5 py-1.5 text-xs text-left transition cursor-pointer",
+                      isSelected
+                        ? "bg-hover font-semibold text-accent"
+                        : "text-zinc-200 hover:bg-hover hover:text-zinc-100",
+                      opt.disabled && "cursor-not-allowed opacity-40 hover:bg-transparent"
+                    )}
+                  >
+                    <span className="truncate pr-2">{opt.label}</span>
+                    {isSelected && <Check className="h-3.5 w-3.5 shrink-0 text-accent" />}
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+});
 
 export function Field({ label, children, className, hint }: { label: string; children: ReactNode; className?: string; hint?: ReactNode }) {
   return (

@@ -2,7 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { Archive, ArchiveRestore, Banknote, CreditCard, Landmark, LineChart, Pencil, Plus, Repeat, Smartphone, Trash2, Wallet } from "lucide-react";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { DateField } from "../components/Calendar";
-import { CategoryOptions } from "../components/TxnDialog";
+import { CategorySelect } from "../components/CategorySelect";
 import { Amount, Button, Card, CardHeader, Dialog, Empty, ErrorNote, Field, Input, PageHeader, Segmented, Select, Skeleton } from "../components/ui";
 import { api, type Account, type AccountType, type Recurring } from "../lib/api";
 import { money, rupeesInput, shortDate, todayISO, toPaise } from "../lib/format";
@@ -376,10 +376,13 @@ function RecurringDialog({ rule, onClose }: { rule: Recurring | "new" | null; on
             </Select>
           </Field>
           <Field label="Category">
-            <Select value={form.category_id} onChange={(e) => set("category_id", e.target.value)}>
-              <option value="">Uncategorised</option>
-              <CategoryOptions cats={cats} kind={form.kind} />
-            </Select>
+            <CategorySelect
+              value={form.category_id}
+              onChange={(id) => set("category_id", id)}
+              cats={cats}
+              kind={form.kind}
+              placeholder="Uncategorised"
+            />
           </Field>
           <Field label="Repeats">
             <Select value={form.frequency} onChange={(e) => set("frequency", e.target.value)}>

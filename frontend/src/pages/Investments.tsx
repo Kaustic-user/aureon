@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Archive, Loader2, Plus, RefreshCw, Search, Tag, Trash2, TrendingUp } from "lucide-react";
+import { Archive, ArchiveRestore, Loader2, Plus, RefreshCw, Search, Tag, Trash2, TrendingUp } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { CHART, Legend, PortfolioChart } from "../components/charts";
 import { DateField } from "../components/Calendar";
@@ -34,9 +34,17 @@ export default function Investments() {
     const list = (data?.holdings ?? []).filter((h) => !h.instrument.archived && (tab === "all" || h.instrument.kind === tab));
     return list.sort((a, b) => (b.value ?? b.invested) - (a.value ?? a.invested));
   }, [data, tab]);
+  const archivedHoldings = useMemo(() => {
+    return (data?.holdings ?? []).filter((h) => h.instrument.archived && (tab === "all" || h.instrument.kind === tab));
+  }, [data, tab]);
   const totals = tab === "all" ? data?.totals : data?.by_kind[tab];
   const current = holdings.filter((h) => Number(h.units) > 0);
   const closed = holdings.filter((h) => Number(h.units) === 0);
+
+  const restore = useMutation({
+    mutationFn: (inst: Instrument) => api.put(`/investments/instruments/${inst.id}`, { ...inst, archived: false }),
+    onSuccess: invalidate,
+  });
 
   // keep the detail dialog in sync after edits
   useEffect(() => {
@@ -165,6 +173,65 @@ export default function Investments() {
       <p className="text-xs text-faint">
         Cost basis is FIFO. XIRR is shown once a holding is at least 30 days old. Tip: click a holding to record a buy, sell, dividend or price.
       </p>
+
+      {archivedHoldings.length > 0 && (
+        <Card className="p-0">
+          <div className="flex items-center justify-between border-b border-line px-4 py-3">
+            <h2 className="text-xs font-medium text-faint">Archived Holdings</h2>
+            <span className="text-xs text-faint">{archivedHoldings.length}</span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] text-sm">
+              <tbody>
+                {archivedHoldings.map((h) => (
+                  <tr
+                    key={h.instrument.id}
+                    onClick={() => setSelected(h)}
+                    className="cursor-pointer border-b border-line/60 last:border-0 hover:bg-hover opacity-75 transition hover:opacity-100"
+                  >
+                    <td className="max-w-[300px] px-4 py-2.5">
+                      <div className="truncate text-zinc-300">{h.instrument.name}</div>
+                      <div className="text-xs text-faint">
+                        {h.instrument.kind === "stock" ? `${h.instrument.exchange ?? "NSE"}:${h.instrument.symbol}` : `AMFI ${h.instrument.symbol}`}
+                        {h.instrument.sub_category && ` · ${h.instrument.sub_category}`}
+                        {Number(h.units) === 0 ? " · 0 units" : ` · ${dec(h.units, 3)} units`}
+                      </div>
+                    </td>
+                    <td className="maskable py-2.5 text-right font-mono tabular-nums text-muted">{dec(h.units, 3)}</td>
+                    <td className="py-2.5 text-right">
+                      <div className="font-mono tabular-nums">{h.price ? dec(h.price, 2) : "—"}</div>
+                      {h.price_date && <div className="text-[11px] text-faint">{shortDate(h.price_date)}</div>}
+                    </td>
+                    <td className="py-2.5 text-right"><Amount value={h.invested} className="text-muted" /></td>
+                    <td className="py-2.5 text-right">{h.value != null ? <Amount value={h.value} /> : "—"}</td>
+                    <td className="py-2.5 text-right">
+                      {h.unrealized != null ? (
+                        <>
+                          <Amount value={h.unrealized} kind="gain" />
+                          <div className={cn("font-mono text-[11px]", (h.unrealized_pct ?? 0) >= 0 ? "text-income/80" : "text-expense/80")}>
+                            {pct(h.unrealized_pct, 1, true)}
+                          </div>
+                        </>
+                      ) : "—"}
+                    </td>
+                    <td className="px-4 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => restore.mutate(h.instrument)}
+                        disabled={restore.isPending}
+                        title="Restore holding to active portfolio"
+                      >
+                        <ArchiveRestore className="h-3.5 w-3.5" /> Restore
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
 
       <AddInstrument open={adding} onClose={() => setAdding(false)} />
       <HoldingDialog holding={selected} onClose={() => setSelected(null)} />
@@ -349,8 +416,12 @@ function HoldingDialog({ holding, onClose }: { holding: Holding | null; onClose:
     mutationFn: () => api.put(`/investments/instruments/${inst!.id}`, { ...inst!, archived: true }),
     onSuccess: () => { invalidate(); onClose(); },
   });
+  const unarchive = useMutation({
+    mutationFn: () => api.put(`/investments/instruments/${inst!.id}`, { ...inst!, archived: false }),
+    onSuccess: () => { invalidate(); onClose(); },
+  });
   const remove = useMutation({
-    mutationFn: () => api.del(`/investments/instruments/${inst!.id}`),
+    mutationFn: () => api.del(`/investments/instruments/${inst!.id}?cascade=true`),
     onSuccess: () => { invalidate(); onClose(); },
   });
   const accName = new Map(accounts.map((a) => [a.id, a.name]));
@@ -416,17 +487,39 @@ function HoldingDialog({ holding, onClose }: { holding: Holding | null; onClose:
             </div>
           </div>
 
-          <div className="flex justify-end gap-2 border-t border-line pt-3">
-            <ErrorNote error={archive.error ?? remove.error} />
-            {txns.data?.length ? (
-              <Button size="sm" variant="ghost" onClick={() => confirm("Archive this holding? It will be hidden; history is kept.") && archive.mutate()}>
-                <Archive className="h-3.5 w-3.5" /> Archive
+          <div className="flex items-center justify-between border-t border-line pt-3">
+            <div>
+              <Button
+                size="sm"
+                variant="danger"
+                onClick={() => {
+                  const msg = txns.data?.length
+                    ? `Permanently delete "${inst.name}" along with all its ${txns.data.length} recorded transaction(s)? This cannot be undone.`
+                    : `Permanently delete "${inst.name}"?`;
+                  if (confirm(msg)) remove.mutate();
+                }}
+                disabled={remove.isPending}
+              >
+                <Trash2 className="h-3.5 w-3.5" /> Delete holding
               </Button>
-            ) : (
-              <Button size="sm" variant="danger" onClick={() => remove.mutate()}>
-                <Trash2 className="h-3.5 w-3.5" /> Remove
-              </Button>
-            )}
+            </div>
+            <div className="flex items-center gap-2">
+              <ErrorNote error={archive.error ?? unarchive.error ?? remove.error} />
+              {inst.archived ? (
+                <Button size="sm" variant="secondary" onClick={() => unarchive.mutate()} disabled={unarchive.isPending}>
+                  <ArchiveRestore className="h-3.5 w-3.5" /> Restore
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => confirm("Archive this holding? It will be hidden from your active list, but transaction history is preserved.") && archive.mutate()}
+                  disabled={archive.isPending}
+                >
+                  <Archive className="h-3.5 w-3.5" /> Archive
+                </Button>
+              )}
+            </div>
           </div>
         </>
       )}

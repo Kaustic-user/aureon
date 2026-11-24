@@ -36,8 +36,8 @@ def _get(session: Session, model, obj_id: int, label: str):
 
 
 @router.get("/portfolio", response_model=PortfolioOut)
-def get_portfolio(session: Session = DB):
-    return services.portfolio(session)
+def get_portfolio(include_archived: bool = Query(False), session: Session = DB):
+    return services.portfolio(session, include_closed=include_archived)
 
 
 @router.get("/history")
@@ -77,13 +77,15 @@ def update_instrument(inst_id: int, body: InstrumentIn, session: Session = DB):
 
 
 @router.delete("/instruments/{inst_id}", status_code=204)
-def delete_instrument(inst_id: int, session: Session = DB):
+def delete_instrument(inst_id: int, cascade: bool = Query(False), session: Session = DB):
     inst = _get(session, Instrument, inst_id, "instrument")
     used = session.scalar(
         select(func.count()).select_from(InvestmentTxn).where(InvestmentTxn.instrument_id == inst_id)
     )
-    if used:
+    if used and not cascade:
         raise HTTPException(409, "Instrument has transactions. Archive it instead.")
+    if used and cascade:
+        session.query(InvestmentTxn).filter(InvestmentTxn.instrument_id == inst_id).delete()
     session.query(PriceSnapshot).filter(PriceSnapshot.instrument_id == inst_id).delete()
     session.delete(inst)
     session.commit()
