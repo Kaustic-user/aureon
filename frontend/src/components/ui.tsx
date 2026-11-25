@@ -86,7 +86,8 @@ function extractOptions(children: ReactNode): ParsedOption[] {
     const elem = child as ReactElement<any>;
     if (elem.type === "option") {
       result.push({
-        value: String(elem.props.value ?? ""),
+        // Like a native <option>: no value attribute means the text is the value.
+        value: String(elem.props.value ?? (typeof elem.props.children === "string" ? elem.props.children : "")),
         label: elem.props.children ?? elem.props.value,
         disabled: elem.props.disabled,
       });
@@ -95,7 +96,7 @@ function extractOptions(children: ReactNode): ParsedOption[] {
         if (!isValidElement(opt)) return;
         const o = opt as ReactElement<any>;
         result.push({
-          value: String(o.props.value ?? ""),
+          value: String(o.props.value ?? (typeof o.props.children === "string" ? o.props.children : "")),
           label: o.props.children ?? o.props.value,
           disabled: o.props.disabled,
         });
