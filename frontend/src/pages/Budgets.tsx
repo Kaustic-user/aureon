@@ -4,10 +4,11 @@ import { CatBadge } from "../components/CatBadge";
 import { useState } from "react";
 import { Amount, Button, Card, CardHeader, Empty, ErrorNote, Input, PageHeader, Progress, Skeleton } from "../components/ui";
 import { api, type BudgetMonth, type BudgetRow } from "../lib/api";
+import { catBar } from "../lib/palette";
 import { money, monthLabel, rupeesInput, shiftMonth, toPaise } from "../lib/format";
 import { useMonthParam } from "../lib/useMonth";
 import { cn } from "../lib/utils";
-import { MonthPicker } from "./Overview";
+import { MonthPicker } from "../components/Calendar";
 
 export default function Budgets() {
   const [month, setMonth] = useMonthParam();
@@ -113,7 +114,7 @@ function BudgetLine({ row, onSave, saving }: { row: BudgetRow; onSave: (paise: n
       <div className="order-3 col-span-2 sm:order-none sm:col-span-1">
         {row.budget ? (
           <div className="flex items-center gap-3">
-            <Progress value={ratio} color={row.color} tone={ratio > 1 ? "over" : ratio > 0.85 ? "warn" : "default"} />
+            <Progress value={ratio} color={catBar(row.color)} tone={ratio > 1 ? "over" : ratio > 0.85 ? "warn" : "default"} />
             <span className={cn("maskable w-40 shrink-0 text-right font-mono text-xs tabular-nums", ratio > 1 ? "text-expense" : "text-muted")}>
               {money(row.spent)} {ratio > 1 ? `· ${money(row.spent - row.budget)} over` : `· ${money(row.budget - row.spent)} left`}
             </span>

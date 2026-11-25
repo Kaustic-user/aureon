@@ -1,6 +1,6 @@
 import { Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import type { Category, Txn, TxnIn, TxnKind } from "../lib/api";
+import type { Txn, TxnIn, TxnKind } from "../lib/api";
 import { rupeesInput, todayISO, toPaise } from "../lib/format";
 import { useAccounts, useCategories, useDeleteTxn, useSaveTxn } from "../lib/queries";
 import { DateField } from "./Calendar";
@@ -8,32 +8,6 @@ import { CategorySelect } from "./CategorySelect";
 import { Button, Dialog, ErrorNote, Field, Input, Segmented, Select } from "./ui";
 
 export type TxnDraft = Partial<TxnIn> & { id?: number };
-
-/** Category <select> grouped as "Food" then indented children. */
-export function CategoryOptions({ cats, kind }: { cats: Category[]; kind: "expense" | "income" }) {
-  const tops = cats.filter((c) => c.kind === kind && c.parent_id == null && !c.archived);
-  return (
-    <>
-      {tops.map((t) => {
-        const kids = cats.filter((c) => c.parent_id === t.id && !c.archived);
-        return kids.length ? (
-          <optgroup key={t.id} label={t.name}>
-            <option value={t.id}>{t.name} (general)</option>
-            {kids.map((k) => (
-              <option key={k.id} value={k.id}>
-                {k.name}
-              </option>
-            ))}
-          </optgroup>
-        ) : (
-          <option key={t.id} value={t.id}>
-            {t.name}
-          </option>
-        );
-      })}
-    </>
-  );
-}
 
 export function TxnDialog({ open, draft, onClose }: { open: boolean; draft: TxnDraft | null; onClose: () => void }) {
   const { data: accounts = [] } = useAccounts();

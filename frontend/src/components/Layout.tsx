@@ -14,13 +14,13 @@ import {
   Wallet,
   X,
 } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { Suspense, useEffect, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation } from "react-router";
 import { useActions } from "../lib/actions";
 import { usePrivacy } from "../lib/privacy";
 import { useTheme } from "../lib/theme";
 import { cn } from "../lib/utils";
-import { Button } from "./ui";
+import { Button, Skeleton } from "./ui";
 
 const NAV: { group: string; items: { to: string; label: string; icon: ReactNode }[] }[] = [
   {
@@ -161,7 +161,9 @@ export function Layout() {
           </div>
         </header>
         <main className="mx-auto max-w-[1400px] space-y-4 p-4 sm:p-6">
-          <Outlet />
+          <Suspense fallback={<Skeleton className="h-40" />}>
+            <Outlet />
+          </Suspense>
         </main>
       </div>
     </div>

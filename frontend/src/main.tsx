@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { StrictMode } from "react";
+import { lazy, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes } from "react-router";
 import { Layout } from "./components/Layout";
@@ -9,11 +9,13 @@ import "./index.css";
 import { ActionsProvider } from "./lib/actions";
 import { PrivacyProvider } from "./lib/privacy";
 import { ThemeProvider } from "./lib/theme";
-import Accounts from "./pages/Accounts";
-import Budgets from "./pages/Budgets";
-import Investments from "./pages/Investments";
-import Overview from "./pages/Overview";
-import Transactions from "./pages/Transactions";
+
+// Each page is its own chunk, so the first load only fetches the page you open.
+const Overview = lazy(() => import("./pages/Overview"));
+const Transactions = lazy(() => import("./pages/Transactions"));
+const Budgets = lazy(() => import("./pages/Budgets"));
+const Accounts = lazy(() => import("./pages/Accounts"));
+const Investments = lazy(() => import("./pages/Investments"));
 
 const queryClient = new QueryClient({
   defaultOptions: {

@@ -1,9 +1,12 @@
 // Shared calendar pieces: one look for the month picker, range picker and date fields.
 import { CalendarDays, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { isoDate, monthLabel, parseISO, shiftMonth, todayISO } from "../lib/format";
+import { useState, type ReactNode } from "react";
+import { currentMonth, isoDate, monthLabel, parseISO, shiftMonth, todayISO } from "../lib/format";
 import { cn } from "../lib/utils";
+import { usePopover } from "./Dropdown";
 import { Button } from "./ui";
+
+export { usePopover };
 
 const WEEKDAYS = ["M", "T", "W", "T", "F", "S", "S"];
 
@@ -12,30 +15,6 @@ export function gridDays(month: string): string[] {
   const first = parseISO(month + "-01");
   const offset = (first.getDay() + 6) % 7;
   return Array.from({ length: 42 }, (_, i) => isoDate(new Date(first.getFullYear(), first.getMonth(), 1 - offset + i)));
-}
-
-/** Open/close state for a popover: closes on outside click and Escape (without closing a parent dialog). */
-export function usePopover() {
-  const [open, setOpen] = useState(false);
-  const box = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (!box.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      e.stopPropagation();
-      setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-  return { open, setOpen, box };
 }
 
 export const POPOVER = "z-30 mt-2 w-[min(19rem,calc(100vw-2rem))] rounded-lg border border-line bg-card p-3 shadow-2xl shadow-black/40";
@@ -223,6 +202,57 @@ export function DateField({
               <Button size="sm" variant="ghost" onClick={() => choose(todayISO())}>Today</Button>
             </div>
           </CalendarFrame>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** ‹ month › stepper whose label opens a month/year grid. Used by Overview and Budgets. */
+export function MonthPicker({ month, onChange }: { month: string; onChange: (m: string) => void }) {
+  const isCurrent = month >= currentMonth();
+  const { open, setOpen, box } = usePopover();
+  return (
+    <div ref={box} className="relative">
+      <div className="flex items-center rounded-md border border-line">
+        <Button variant="ghost" size="icon" className="h-9 w-9 rounded-r-none" onClick={() => onChange(shiftMonth(month, -1))} aria-label="Previous month">
+          <ChevronLeft className="h-4 w-4" />
+        </Button>
+        <button
+          className="flex h-9 min-w-32 items-center justify-center gap-2 border-x border-line px-3 text-sm hover:bg-hover"
+          onClick={() => setOpen(!open)}
+          aria-expanded={open}
+          title="Pick month and year"
+        >
+          <CalendarDays className="h-3.5 w-3.5 text-muted" />
+          {month === currentMonth() ? "This month" : monthLabel(month)}
+        </button>
+        <Button variant="ghost" size="icon" className="h-9 w-9 rounded-l-none" onClick={() => onChange(shiftMonth(month, 1))} disabled={isCurrent} aria-label="Next month">
+          <ChevronRight className="h-4 w-4" />
+        </Button>
+      </div>
+      {open && (
+        <div className={`absolute right-0 ${POPOVER}`}>
+          <MonthGrid
+            value={month}
+            max={currentMonth()}
+            onPick={(m) => {
+              onChange(m);
+              setOpen(false);
+            }}
+          />
+          <div className="mt-2 border-t border-line pt-2">
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                onChange(currentMonth());
+                setOpen(false);
+              }}
+            >
+              This month
+            </Button>
+          </div>
         </div>
       )}
     </div>

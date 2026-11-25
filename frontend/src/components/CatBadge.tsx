@@ -3,6 +3,7 @@ import {
   Percent, Phone, Plane, Receipt, Repeat, RotateCcw, ShieldCheck, ShoppingBag, ShoppingCart, Sparkles, Tag, Ticket,
   TrainFront, TrendingUp, Utensils, Wrench, Zap, type LucideIcon,
 } from "lucide-react";
+import { catTileAlpha, catTone } from "../lib/palette";
 import { cn } from "../lib/utils";
 
 const ICONS: Record<string, LucideIcon> = {
@@ -23,7 +24,7 @@ export function CatBadge({ name, color, size = "md", className }: { name?: strin
   return (
     <span
       className={cn("grid shrink-0 place-items-center rounded-md", size === "md" ? "h-8 w-8" : "h-6 w-6", className)}
-      style={{ background: `color-mix(in oklab, ${color} 16%, transparent)`, color }}
+      style={{ background: `color-mix(in oklab, ${catTone(color)} ${catTileAlpha}%, transparent)`, color: catTone(color) }}
     >
       <Icon className={size === "md" ? "h-4 w-4" : "h-3.5 w-3.5"} />
     </span>

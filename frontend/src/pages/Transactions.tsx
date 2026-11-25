@@ -1,26 +1,25 @@
 import { useQuery } from "@tanstack/react-query";
 import { CatBadge } from "../components/CatBadge";
 import { ArrowLeftRight, Plus, Receipt, Search, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
-import { RangePicker } from "../components/RangePicker";
+import { PeriodPicker, type Period } from "../components/PeriodPicker";
 import { CategorySelect } from "../components/CategorySelect";
 import { txnToDraft } from "../components/TxnDialog";
-import { Amount, Button, Card, Empty, ErrorNote, Input, PageHeader, Segmented, Select, Skeleton } from "../components/ui";
+import { Amount, Button, Card, Empty, ErrorNote, Input, PageHeader, Select, Skeleton } from "../components/ui";
 import { useActions } from "../lib/actions";
 import { api, type Txn, type TxnPage } from "../lib/api";
-import { dayHeading, money, monthLabel } from "../lib/format";
+import { currentMonth, dayHeading, money, monthLabel } from "../lib/format";
 import { categoryIndex, useAccounts, useCategories } from "../lib/queries";
 import { useMonthParam } from "../lib/useMonth";
-import { monthBounds, rangeLabel, useRangeParam } from "../lib/useRange";
+import { rangeLabel, useRangeParam } from "../lib/useRange";
 import { cn } from "../lib/utils";
-import { MonthPicker } from "./Overview";
 
 const PAGE = 100;
 
 export default function Transactions() {
-  const [month, setMonth] = useMonthParam();
-  const [range, setRange] = useRangeParam();
+  const [month] = useMonthParam();
+  const [range] = useRangeParam();
   const [params, setParams] = useSearchParams();
   const { openTxn } = useActions();
   const { data: accounts = [] } = useAccounts();
@@ -47,6 +46,32 @@ export default function Transactions() {
       else n.delete(k);
       return n;
     }, { replace: true });
+
+  // Switch period in a single URL update (month and start/end are mutually exclusive).
+  const setPeriod = (p: Period) =>
+    setParams((prev) => {
+      const n = new URLSearchParams(prev);
+      n.delete("month");
+      n.delete("start");
+      n.delete("end");
+      if ("month" in p) {
+        if (p.month !== currentMonth()) n.set("month", p.month);
+      } else {
+        n.set("start", p.range.start);
+        n.set("end", p.range.end);
+      }
+      return n;
+    }, { replace: true });
+
+  // The filter bar sticks under the top bar; day headings stick just below it.
+  const bar = useRef<HTMLDivElement>(null);
+  const [barH, setBarH] = useState(0);
+  useLayoutEffect(() => {
+    if (!bar.current) return;
+    const ro = new ResizeObserver(() => setBarH(bar.current?.offsetHeight ?? 0));
+    ro.observe(bar.current);
+    return () => ro.disconnect();
+  }, []);
 
   const { data, error, isLoading, isFetching } = useQuery({
     queryKey: ["transactions", month, range?.start, range?.end, kind, accountId, categoryId, debouncedQ, limit],
@@ -82,21 +107,20 @@ export default function Transactions() {
     <>
       <PageHeader
         title="Transactions"
-        subtitle={debouncedQ ? `Searching all time for “${debouncedQ}”` : range ? rangeLabel(range) : monthLabel(month)}
+        subtitle={debouncedQ ? `Results for “${debouncedQ}”` : range ? rangeLabel(range) : monthLabel(month)}
         actions={
           <>
-            {!debouncedQ && (
-              <>
-                <Segmented
-                  value={range ? "range" : "month"}
-                  onChange={(m) => setRange(m === "range" ? monthBounds(month) : null)}
-                  options={[
-                    { value: "month", label: "Month" },
-                    { value: "range", label: "Range" },
-                  ]}
-                />
-                {range ? <RangePicker value={range} onChange={setRange} /> : <MonthPicker month={month} onChange={setMonth} />}
-              </>
+            {debouncedQ ? (
+              <button
+                onClick={() => setQ("")}
+                className="flex h-9 items-center gap-2 rounded-md border border-line px-3 text-sm text-muted transition hover:bg-hover hover:text-zinc-100"
+                title="Clear the search and go back to the selected period"
+              >
+                <Search className="h-3.5 w-3.5" /> Searching all time
+                <span className="text-accent">· Limit to period</span>
+              </button>
+            ) : (
+              <PeriodPicker month={month} range={range} onChange={setPeriod} />
             )}
             <Button variant="primary" onClick={() => openTxn({ kind: (kind as "income") || "expense" })}>
               <Plus className="h-4 w-4" /> Add
@@ -105,6 +129,7 @@ export default function Transactions() {
         }
       />
 
+      <div ref={bar} className="sticky top-14 z-20 -mx-1 bg-bg px-1 py-1">
       <Card className="flex flex-wrap items-center gap-2 p-3">
         <div className="relative min-w-48 flex-1">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-faint" />
@@ -129,9 +154,17 @@ export default function Transactions() {
           placeholder="All categories"
           className="w-auto min-w-[160px] max-w-56"
         />
-        {filtered && (
-          <Button
-            variant="ghost"
+      </Card>
+      </div>
+
+      {filtered && (
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          {debouncedQ && <Chip label={`“${debouncedQ}”`} onRemove={() => setQ("")} />}
+          {kind && <Chip label={{ expense: "Expenses", income: "Income", transfer: "Transfers" }[kind] ?? kind} onRemove={() => setParam("kind", "")} />}
+          {accountId && <Chip label={accName.get(Number(accountId)) ?? "Account"} onRemove={() => setParam("account_id", "")} />}
+          {categoryId && <Chip label={idx.byId.get(Number(categoryId))?.name ?? "Category"} onRemove={() => setParam("category_id", "")} />}
+          <button
+            className="text-faint underline-offset-2 hover:text-zinc-200 hover:underline"
             onClick={() => {
               setQ("");
               // Clear filters but keep the period (month or custom range).
@@ -143,16 +176,16 @@ export default function Transactions() {
               setParams(keep, { replace: true });
             }}
           >
-            <X className="h-4 w-4" /> Clear
-          </Button>
-        )}
-      </Card>
+            Clear all
+          </button>
+        </div>
+      )}
 
       {data && (
         <div className="grid grid-cols-3 gap-4">
           <Summary label="Income" value={<Amount value={data.sum_income} kind="income" />} />
           <Summary label="Spent" value={<Amount value={data.sum_expense} kind="expense" />} />
-          <Summary label={`${data.total} transaction${data.total === 1 ? "" : "s"}`} value={<Amount value={data.sum_income - data.sum_expense} kind="gain" />} />
+          <Summary label={`Net · ${data.total} transaction${data.total === 1 ? "" : "s"}`} value={<Amount value={data.sum_income - data.sum_expense} kind="gain" />} />
         </div>
       )}
 
@@ -168,15 +201,15 @@ export default function Transactions() {
           <div>
             {groups.map((g) => (
               <section key={g.date}>
-                <div className="sticky top-14 z-10 flex items-center justify-between border-b border-line bg-card/95 px-4 py-2 text-xs backdrop-blur">
+                <div style={{ top: 56 + barH }} className="sticky z-10 flex items-center justify-between border-b border-line bg-card/95 px-4 py-2 text-xs backdrop-blur">
                   <span className="font-medium text-muted">{dayHeading(g.date)}</span>
-                  <span className={cn("maskable font-mono tabular-nums", g.net >= 0 ? "text-faint" : "text-faint")}>{money(g.net, { sign: true })}</span>
+                  <span className="maskable font-mono tabular-nums text-faint">{money(g.net, { sign: true })}</span>
                 </div>
                 <ul>
                   {g.items.map((t) => {
                     const c = t.category_id != null ? idx.byId.get(t.category_id) : undefined;
                     const top = idx.top(t.category_id);
-                    const color = t.kind === "transfer" ? "#71717a" : top?.color ?? "#52525b";
+                    const color = top?.color ?? "#52525b";
                     return (
                       <li key={t.id}>
                         <button
@@ -235,5 +268,16 @@ function Summary({ label, value }: { label: string; value: React.ReactNode }) {
       <div className="text-xs text-faint">{label}</div>
       <div className="mt-1 text-base font-semibold sm:text-lg">{value}</div>
     </Card>
+  );
+}
+
+function Chip({ label, onRemove }: { label: string; onRemove: () => void }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-accent/30 bg-accent/10 py-0.5 pl-2.5 pr-1 text-accent">
+      {label}
+      <button onClick={onRemove} aria-label={`Remove filter ${label}`} className="grid h-4 w-4 place-items-center rounded-full hover:bg-accent/20">
+        <X className="h-3 w-3" />
+      </button>
+    </span>
   );
 }

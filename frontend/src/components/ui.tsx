@@ -1,5 +1,5 @@
 // Small shadcn-style primitives, hand-written so there is no generator step.
-import { Check, ChevronDown, Search, X } from "lucide-react";
+import { Check, X } from "lucide-react";
 import {
   Children,
   forwardRef,
@@ -18,6 +18,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { money } from "../lib/format";
+import { Chevron, listKeys, panelClass, rowClass, SearchBox, TRIGGER, usePlacement, usePopover } from "./Dropdown";
 import { cn } from "../lib/utils";
 
 export function Card({ className, ...p }: HTMLAttributes<HTMLDivElement>) {
@@ -113,160 +114,83 @@ export interface SelectProps extends Omit<SelectHTMLAttributes<HTMLSelectElement
 }
 
 export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select(
-  {
-    value,
-    onChange,
-    children,
-    options: directOptions,
-    className,
-    disabled = false,
-    placeholder = "Select…",
-    searchable,
-    name,
-  },
+  { value, onChange, children, options: directOptions, className, disabled = false, placeholder = "Select…", searchable, name },
   ref,
 ) {
-  const [open, setOpen] = useState(false);
+  const { open, setOpen, box } = usePopover();
   const [query, setQuery] = useState("");
-  const box = useRef<HTMLDivElement>(null);
+  const [active, setActive] = useState(-1);
   const searchRef = useRef<HTMLInputElement>(null);
+  const list = useRef<HTMLDivElement>(null);
+  const place = usePlacement(open, box);
 
-  const options = useMemo(() => {
-    if (directOptions) return directOptions;
-    return extractOptions(children);
-  }, [directOptions, children]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (!box.current?.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
+  const options = useMemo(() => directOptions ?? extractOptions(children), [directOptions, children]);
   const showSearch = searchable ?? options.length > 7;
 
-  useEffect(() => {
-    if (open) {
-      setQuery("");
-      if (showSearch) {
-        setTimeout(() => searchRef.current?.focus(), 25);
-      }
-    }
-  }, [open, showSearch]);
-
-  const selectedOpt = useMemo(() => {
-    return options.find((o) => String(o.value) === String(value ?? "")) ?? null;
-  }, [options, value]);
-
-  const filteredOptions = useMemo(() => {
-    if (!query.trim()) return options;
+  const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return options.filter((o) => {
-      const text = typeof o.label === "string" ? o.label : String(o.value);
-      return text.toLowerCase().includes(q);
-    });
+    if (!q) return options;
+    return options.filter((o) => (typeof o.label === "string" ? o.label : String(o.value)).toLowerCase().includes(q));
   }, [options, query]);
 
-  const handleSelect = (optVal: string) => {
-    if (onChange) {
-      const syntheticEvent = {
-        target: { value: optVal, name: name ?? "" },
-        currentTarget: { value: optVal, name: name ?? "" },
-      } as ChangeEvent<HTMLSelectElement>;
-      onChange(syntheticEvent);
-    }
+  const selectedOpt = options.find((o) => String(o.value) === String(value ?? "")) ?? null;
+
+  // On open: clear the search and start on the selected row.
+  useEffect(() => {
+    if (!open) return;
+    setQuery("");
+    setActive(Math.max(0, options.findIndex((o) => String(o.value) === String(value ?? ""))));
+    if (showSearch) setTimeout(() => searchRef.current?.focus(), 25);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  useEffect(() => setActive((a) => Math.min(a, filtered.length - 1)), [filtered.length]);
+  useEffect(() => {
+    list.current?.querySelector<HTMLElement>('[data-active="true"]')?.scrollIntoView({ block: "nearest" });
+  }, [active, open]);
+
+  const choose = (i: number) => {
+    const opt = filtered[i];
+    if (!opt || opt.disabled) return;
+    onChange?.({ target: { value: opt.value, name: name ?? "" }, currentTarget: { value: opt.value, name: name ?? "" } } as ChangeEvent<HTMLSelectElement>);
     setOpen(false);
   };
 
-  const isAuto = className?.includes("w-auto");
-
+  const auto = className?.includes("w-auto");
   return (
-    <div ref={box} className={cn("relative inline-block", isAuto ? "w-auto min-w-[130px]" : className?.includes("w-") ? className : "w-full")}>
-      <button
-        ref={ref}
-        type="button"
-        disabled={disabled}
-        onClick={() => setOpen(!open)}
-        className={cn(
-          field,
-          "cursor-pointer pr-8 font-normal shadow-2xs transition flex items-center justify-between text-left",
-          "hover:border-zinc-700 hover:bg-hover/30",
-          open && "border-accent ring-1 ring-accent/40",
-          disabled && "cursor-not-allowed opacity-50",
-          className
-        )}
-      >
-        <span className="truncate text-zinc-100 font-medium">
-          {selectedOpt ? selectedOpt.label : <span className="text-faint">{placeholder}</span>}
-        </span>
-        <ChevronDown
-          className={cn(
-            "pointer-events-none h-4 w-4 shrink-0 text-muted transition-transform duration-200",
-            open && "rotate-180 text-accent"
-          )}
-        />
+    <div
+      ref={box}
+      className={cn("relative", auto ? "inline-block min-w-32" : className?.includes("w-") ? "inline-block" : "w-full", className)}
+      onKeyDown={(e) => listKeys(e, { open, setOpen, count: filtered.length, active, setActive, choose })}
+    >
+      <button ref={ref} type="button" disabled={disabled} aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen(!open)} className={cn(TRIGGER, open && "border-accent/60")}>
+        <span className="truncate">{selectedOpt ? selectedOpt.label : <span className="text-faint">{placeholder}</span>}</span>
+        <Chevron open={open} />
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full mt-1.5 z-50 w-full min-w-[180px] max-w-sm rounded-lg border border-line bg-card p-1 shadow-2xl shadow-black/80">
-          {showSearch && (
-            <div className="relative mb-1 px-1 pt-1">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-faint" />
-              <input
-                ref={searchRef}
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search…"
-                className="h-8 w-full rounded border border-line bg-bg pl-8 pr-7 text-xs text-zinc-100 placeholder:text-faint outline-none focus:border-accent"
-              />
-              {query && (
-                <button
-                  type="button"
-                  onClick={() => setQuery("")}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-faint hover:text-zinc-200 cursor-pointer"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              )}
-            </div>
-          )}
-
-          <div className="max-h-56 overflow-y-auto scrollbar-thin divide-y divide-line/40 p-0.5">
-            {filteredOptions.length === 0 ? (
+        <div className={panelClass(place)}>
+          {showSearch && <SearchBox value={query} onChange={(v) => { setQuery(v); setActive(0); }} placeholder="Search…" inputRef={searchRef} />}
+          <div ref={list} role="listbox" className="scrollbar-thin max-h-60 space-y-0.5 overflow-y-auto">
+            {filtered.length === 0 ? (
               <div className="py-3 text-center text-xs text-faint">No options found</div>
             ) : (
-              filteredOptions.map((opt) => {
-                const isSelected = String(opt.value) === String(value ?? "");
+              filtered.map((opt, i) => {
+                const selected = String(opt.value) === String(value ?? "");
                 return (
                   <button
                     key={opt.value}
                     type="button"
+                    role="option"
+                    aria-selected={selected}
+                    data-active={i === active}
                     disabled={opt.disabled}
-                    onClick={() => handleSelect(opt.value)}
-                    className={cn(
-                      "flex w-full items-center justify-between rounded px-2.5 py-1.5 text-xs text-left transition cursor-pointer",
-                      isSelected
-                        ? "bg-hover font-semibold text-accent"
-                        : "text-zinc-200 hover:bg-hover hover:text-zinc-100",
-                      opt.disabled && "cursor-not-allowed opacity-40 hover:bg-transparent"
-                    )}
+                    onClick={() => choose(i)}
+                    onMouseMove={() => active !== i && setActive(i)}
+                    className={rowClass(selected, i === active, opt.disabled)}
                   >
-                    <span className="truncate pr-2">{opt.label}</span>
-                    {isSelected && <Check className="h-3.5 w-3.5 shrink-0 text-accent" />}
+                    <span className="truncate">{opt.label}</span>
+                    {selected && <Check className="h-3.5 w-3.5 shrink-0" />}
                   </button>
                 );
               })

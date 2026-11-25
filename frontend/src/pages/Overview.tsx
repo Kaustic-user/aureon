@@ -1,71 +1,22 @@
-import { ArrowDownLeft, ArrowRight, ArrowUpRight, CalendarClock, CalendarDays, ChevronLeft, ChevronRight, Landmark, PiggyBank, Repeat } from "lucide-react";
+import { ArrowDownLeft, ArrowRight, ArrowUpRight, CalendarClock, Landmark, PiggyBank, Repeat } from "lucide-react";
 import { Link } from "react-router";
-import { MonthGrid, POPOVER, usePopover } from "../components/Calendar";
+import { MonthPicker } from "../components/Calendar";
 import { CatBadge } from "../components/CatBadge";
 import { CashFlowChart, CHART, Legend, NetWorthChart, PaceChart, SavingsBars } from "../components/charts";
 import { Amount, Card, CardHeader, Delta, Empty, ErrorNote, PageHeader, Progress, Skeleton, Button } from "../components/ui";
 import type { Dashboard } from "../lib/api";
 import { useActions } from "../lib/actions";
+import { catBar, chipTone } from "../lib/palette";
 import { currentMonth, money, monthLabel, pct, shiftMonth, shortDate } from "../lib/format";
 import { useDashboard } from "../lib/queries";
 import { useMonthParam } from "../lib/useMonth";
 import { cn } from "../lib/utils";
 
-export function MonthPicker({ month, onChange }: { month: string; onChange: (m: string) => void }) {
-  const isCurrent = month >= currentMonth();
-  const { open, setOpen, box } = usePopover();
-  return (
-    <div ref={box} className="relative">
-      <div className="flex items-center rounded-md border border-line">
-        <Button variant="ghost" size="icon" className="h-9 w-9 rounded-r-none" onClick={() => onChange(shiftMonth(month, -1))} aria-label="Previous month">
-          <ChevronLeft className="h-4 w-4" />
-        </Button>
-        <button
-          className="flex h-9 min-w-32 items-center justify-center gap-2 border-x border-line px-3 text-sm hover:bg-hover"
-          onClick={() => setOpen(!open)}
-          aria-expanded={open}
-          title="Pick month and year"
-        >
-          <CalendarDays className="h-3.5 w-3.5 text-muted" />
-          {month === currentMonth() ? "This month" : monthLabel(month)}
-        </button>
-        <Button variant="ghost" size="icon" className="h-9 w-9 rounded-l-none" onClick={() => onChange(shiftMonth(month, 1))} disabled={isCurrent} aria-label="Next month">
-          <ChevronRight className="h-4 w-4" />
-        </Button>
-      </div>
-      {open && (
-        <div className={`absolute right-0 ${POPOVER}`}>
-          <MonthGrid
-            value={month}
-            max={currentMonth()}
-            onPick={(m) => {
-              onChange(m);
-              setOpen(false);
-            }}
-          />
-          <div className="mt-2 border-t border-line pt-2">
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => {
-                onChange(currentMonth());
-                setOpen(false);
-              }}
-            >
-              This month
-            </Button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function Kpi({ label, children, caption, tone, icon }: { label: string; children: React.ReactNode; caption: React.ReactNode; tone: string; icon: React.ReactNode }) {
   return (
     <Card className="transition hover:border-zinc-700 hover:bg-hover">
       <div className="flex items-center gap-2 text-sm text-muted">
-        <span className="grid h-6 w-6 place-items-center rounded-md" style={{ background: `color-mix(in oklab, ${tone} 16%, transparent)`, color: tone }}>{icon}</span>
+        <span className="grid h-6 w-6 place-items-center rounded-md" style={{ background: `color-mix(in oklab, ${chipTone(tone)} 16%, transparent)`, color: chipTone(tone) }}>{icon}</span>
         {label}
       </div>
       <div className="mt-2 text-2xl font-bold">{children}</div>
@@ -228,7 +179,7 @@ function Blocks({ d }: { d: Dashboard }) {
                     </span>
                   </div>
                   <div className="h-1.5 overflow-hidden rounded-full bg-zinc-800">
-                    <div className="h-full rounded-full opacity-90 transition group-hover:opacity-100" style={{ width: `${(c.amount / maxCat) * 100}%`, background: c.color }} />
+                    <div className="h-full rounded-full opacity-90 transition group-hover:opacity-100" style={{ width: `${(c.amount / maxCat) * 100}%`, background: catBar(c.color) }} />
                   </div>
                 </Link>
               ))}
@@ -251,7 +202,7 @@ function Blocks({ d }: { d: Dashboard }) {
                         {money(r.spent)} / {money(r.budget!)}
                       </span>
                     </div>
-                    <Progress value={ratio} color={r.color} tone={ratio > 1 ? "over" : ratio > 0.85 ? "warn" : "default"} />
+                    <Progress value={ratio} color={catBar(r.color)} tone={ratio > 1 ? "over" : ratio > 0.85 ? "warn" : "default"} />
                   </div>
                 );
               })}
