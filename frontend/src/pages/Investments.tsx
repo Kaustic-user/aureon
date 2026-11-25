@@ -171,7 +171,7 @@ export default function Investments() {
         )}
       </Card>
       <p className="text-xs text-faint">
-        Cost basis is FIFO. XIRR is shown once a holding is at least 30 days old. Tip: click a holding to record a buy, sell, dividend or price.
+        Cost basis is FIFO. XIRR is shown once a holding is at least 30 days old. Tip: click a holding to record a buy, vest (employer shares), sell, dividend or price.
       </p>
 
       {archivedHoldings.length > 0 && (
@@ -371,6 +371,8 @@ function AddInstrument({ open, onClose }: { open: boolean; onClose: () => void }
               <Select value={exchange} onChange={(e) => setExchange(e.target.value)}>
                 <option>NSE</option>
                 <option>BSE</option>
+                <option>NASDAQ</option>
+                <option>NYSE</option>
               </Select>
             </Field>
           </div>
@@ -472,7 +474,7 @@ function HoldingDialog({ holding, onClose }: { holding: Holding | null; onClose:
                       <tr key={t.id} onClick={() => setEditing(t)} className="cursor-pointer border-b border-line/60 last:border-0 hover:bg-hover">
                         <td className="px-3 py-2 text-xs text-muted">{shortDate(t.date)} {t.date.slice(0, 4)}</td>
                         <td className="py-2">
-                          <span className={cn("rounded px-1.5 py-0.5 text-[11px] font-medium uppercase", t.type === "buy" ? "bg-teal-500/10 text-accent" : t.type === "sell" ? "bg-amber-500/10 text-warn" : "bg-green-500/10 text-income")}>{t.type}</span>
+                          <span className={cn("rounded px-1.5 py-0.5 text-[11px] font-medium uppercase", t.type === "buy" ? "bg-teal-500/10 text-accent" : t.type === "vest" ? "bg-violet-500/10 text-violet-400" : t.type === "sell" ? "bg-amber-500/10 text-warn" : "bg-green-500/10 text-income")}>{t.type}</span>
                         </td>
                         <td className="maskable py-2 text-right font-mono text-xs text-muted">{t.units ? `${dec(t.units, 4)} @ ${dec(t.price, 2)}` : ""}</td>
                         <td className="py-2 text-right"><Amount value={t.amount} exact={t.amount % 100 !== 0} /></td>
@@ -536,6 +538,9 @@ function Stat({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
+const US_EXCHANGES = ["NASDAQ", "NYSE"];
+const FX_KEY = "aureon.usdInr"; // last USD→INR rate used, pre-filled next time
+
 function InvTxnForm({ inst, txn, onDone, onCancel }: { inst: Instrument; txn: InvTxn | null; onDone: () => void; onCancel: () => void }) {
   const { data: accounts = [] } = useAccounts();
   const [type, setType] = useState<InvTxn["type"]>(txn?.type ?? "buy");
@@ -546,13 +551,25 @@ function InvTxnForm({ inst, txn, onDone, onCancel }: { inst: Instrument; txn: In
   const [amountTouched, setAmountTouched] = useState(!!txn);
   const [accountId, setAccountId] = useState(txn ? String(txn.account_id ?? "") : String(accounts.find((a) => a.type === "bank" && !a.archived)?.id ?? ""));
   const [note, setNote] = useState(txn?.note ?? "");
+  // USD helper for US-listed shares: price in USD × USD→INR rate gives the ₹ price.
+  const usStock = inst.kind === "stock" && US_EXCHANGES.includes(inst.exchange ?? "");
+  const [usd, setUsd] = useState(usStock && !txn);
+  const [usdPrice, setUsdPrice] = useState("");
+  const [fx, setFx] = useState(() => localStorage.getItem(FX_KEY) ?? "");
+  const hasUnits = type !== "dividend";
+
+  useEffect(() => {
+    if (!usd) return;
+    const p = Number(usdPrice), r = Number(fx);
+    setPrice(p > 0 && r > 0 ? String(Math.round(p * r * 10000) / 10000) : "");
+  }, [usd, usdPrice, fx]);
 
   // Suggest amount = units × price until the user edits it (charges, stamp duty…)
   useEffect(() => {
-    if (amountTouched || type === "dividend") return;
+    if (amountTouched || !hasUnits) return;
     const u = Number(units), p = Number(price);
     if (u > 0 && p > 0) setAmount((Math.round(u * p * 100) / 100).toFixed(2));
-  }, [units, price, type, amountTouched]);
+  }, [units, price, hasUnits, amountTouched]);
 
   const save = useMutation({
     mutationFn: (body: object) => (txn ? api.put(`/investments/txns/${txn.id}`, body) : api.post("/investments/txns", body)),
@@ -564,43 +581,80 @@ function InvTxnForm({ inst, txn, onDone, onCancel }: { inst: Instrument; txn: In
     e.preventDefault();
     const paise = toPaise(amount);
     if (!paise) return;
+    // Keep the USD figures with the entry, so the ₹ value can be traced later.
+    const usdNote = usd && hasUnits && usdPrice && fx ? `$${usdPrice} × ₹${fx}` : "";
+    if (usd && fx) localStorage.setItem(FX_KEY, fx);
     save.mutate({
       instrument_id: inst.id,
-      account_id: accountId ? Number(accountId) : null,
+      account_id: type === "vest" || !accountId ? null : Number(accountId),
       date,
       type,
-      units: type === "dividend" ? null : units.trim(),
-      price: type === "dividend" || !price.trim() ? null : price.trim(),
+      units: hasUnits ? units.trim() : null,
+      price: !hasUnits || !price.trim() ? null : price.trim(),
       amount: paise,
-      note: note.trim() || null,
+      note: [note.trim(), usdNote].filter(Boolean).join(" · ") || null,
     });
   }
 
   return (
     <form onSubmit={submit} className="mb-3 space-y-3 rounded-md border border-zinc-700 bg-bg p-3">
-      <Segmented value={type} onChange={setType} options={[{ value: "buy", label: "Buy" }, { value: "sell", label: "Sell" }, { value: "dividend", label: "Dividend" }]} />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Segmented
+          value={type}
+          onChange={setType}
+          options={[
+            { value: "buy", label: "Buy" },
+            ...(inst.kind === "stock" || type === "vest" ? [{ value: "vest" as const, label: "Vest" }] : []),
+            { value: "sell", label: "Sell" },
+            { value: "dividend", label: "Dividend" },
+          ]}
+        />
+        {inst.kind === "stock" && hasUnits && (
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-muted">
+            <input type="checkbox" checked={usd} onChange={(e) => setUsd(e.target.checked)} className="accent-[var(--color-accent)]" />
+            Price in USD
+          </label>
+        )}
+      </div>
+      {type === "vest" && (
+        <p className="text-xs text-faint">
+          Shares from your employer (RSU / ESPP). Enter the <span className="text-muted">net shares received</span> and their market value on the vest date.
+          No account is charged, and it isn't counted as "Invested" on Overview.
+        </p>
+      )}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Field label="Date"><DateField value={date} onChange={setDate} /></Field>
-        {type !== "dividend" && (
+        <Field label={type === "vest" ? "Vest date" : "Date"}><DateField value={date} onChange={setDate} /></Field>
+        {hasUnits && (
           <>
-            <Field label="Units"><Input value={units} onChange={(e) => setUnits(e.target.value)} inputMode="decimal" className="font-mono" required /></Field>
-            <Field label={inst.kind === "mutual_fund" ? "NAV" : "Price"}><Input value={price} onChange={(e) => setPrice(e.target.value)} inputMode="decimal" className="font-mono" /></Field>
+            <Field label={type === "vest" ? "Net shares" : "Units"}><Input value={units} onChange={(e) => setUnits(e.target.value)} inputMode="decimal" className="font-mono" required /></Field>
+            {usd ? (
+              <>
+                <Field label="Price (USD)"><Input value={usdPrice} onChange={(e) => setUsdPrice(e.target.value)} inputMode="decimal" className="font-mono" placeholder="172.50" required /></Field>
+                <Field label="USD → INR" hint="SBI TT buying rate"><Input value={fx} onChange={(e) => setFx(e.target.value)} inputMode="decimal" className="font-mono" placeholder="84.10" required /></Field>
+              </>
+            ) : (
+              <Field label={inst.kind === "mutual_fund" ? "NAV" : "Price (₹)"}><Input value={price} onChange={(e) => setPrice(e.target.value)} inputMode="decimal" className="font-mono" /></Field>
+            )}
           </>
         )}
-        <Field label={type === "buy" ? "Total paid (₹)" : "Received (₹)"}>
+        <Field label={type === "buy" ? "Total paid (₹)" : type === "vest" ? "Value on vest date (₹)" : "Received (₹)"}>
           <Input value={amount} onChange={(e) => { setAmount(e.target.value); setAmountTouched(true); }} inputMode="decimal" className="font-mono" required />
         </Field>
-        <Field label={type === "buy" ? "Paid from" : "Credited to"} className="col-span-2">
-          <Select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
-            <option value="">Not tracked</option>
-            {accounts.filter((a) => !a.archived || String(a.id) === accountId).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-          </Select>
-        </Field>
-        <Field label="Note" className="col-span-2"><Input value={note} onChange={(e) => setNote(e.target.value)} /></Field>
+        {type !== "vest" && (
+          <Field label={type === "buy" ? "Paid from" : "Credited to"} className="col-span-2">
+            <Select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+              <option value="">Not tracked</option>
+              {accounts.filter((a) => !a.archived || String(a.id) === accountId).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </Select>
+          </Field>
+        )}
+        <Field label="Note" className="col-span-2"><Input value={note} onChange={(e) => setNote(e.target.value)} placeholder={type === "vest" ? "e.g. RSU grant 2024, release #3" : undefined} /></Field>
       </div>
-      {type !== "dividend" && units && price && Number(units) > 0 && (
+      {hasUnits && units && price && Number(units) > 0 && (
         <p className="text-xs text-faint">
-          {units} × ₹{price} = <span className="font-mono">{money(Math.round(Number(units) * Number(price) * 100), { exact: true })}</span>. Adjust the total for charges.
+          {units} × {usd ? <>${usdPrice} × ₹{fx} = ₹{price}/share → </> : <>₹{price} = </>}
+          <span className="font-mono">{money(Math.round(Number(units) * Number(price) * 100), { exact: true })}</span>
+          {type === "buy" ? ". Adjust the total for charges." : type === "sell" ? ". Adjust for fees and tax withheld." : "."}
         </p>
       )}
       <ErrorNote error={save.error ?? del.error} />

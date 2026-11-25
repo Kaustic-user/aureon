@@ -118,10 +118,12 @@ def _validate_inv(session: Session, body: InvTxnIn) -> None:
     _get(session, Instrument, body.instrument_id, "instrument")
     if body.account_id is not None:
         _get(session, Account, body.account_id, "account")
-    if body.type in ("buy", "sell") and body.units is None:
+    if body.type in ("buy", "sell", "vest") and body.units is None:
         raise HTTPException(422, f"A {body.type} needs the number of units")
     if body.type == "dividend" and body.units is not None:
         raise HTTPException(422, "A dividend has no units")
+    if body.type == "vest" and body.account_id is not None:
+        raise HTTPException(422, "A vest is not paid from an account; leave the account empty")
 
 
 @router.get("/instruments/{inst_id}/txns", response_model=list[InvTxnOut])

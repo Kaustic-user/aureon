@@ -13,17 +13,19 @@ interface CategorySelectProps {
   placeholder?: string;
   className?: string;
   disabled?: boolean;
+  /** Taller list (shows more categories at once), e.g. for the Transactions filter. */
+  tall?: boolean;
 }
 
 type Item = { id: string; label: string; cat?: Category; child?: boolean; general?: boolean };
 
-export function CategorySelect({ value, onChange, cats, kind = "all", placeholder = "Uncategorised", className, disabled = false }: CategorySelectProps) {
+export function CategorySelect({ value, onChange, cats, kind = "all", placeholder = "Uncategorised", className, disabled = false, tall = false }: CategorySelectProps) {
   const { open, setOpen, box } = usePopover();
   const [search, setSearch] = useState("");
   const [active, setActive] = useState(0);
   const searchRef = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
-  const place = usePlacement(open, box, 340);
+  const place = usePlacement(open, box, tall ? 520 : 340);
 
   const selectedCat = value ? (cats.find((c) => String(c.id) === String(value)) ?? null) : null;
   const parentCat = selectedCat?.parent_id ? (cats.find((c) => c.id === selectedCat.parent_id) ?? null) : null;
@@ -124,7 +126,7 @@ export function CategorySelect({ value, onChange, cats, kind = "all", placeholde
       {open && (
         <div className={panelClass(place, true)}>
           <SearchBox value={search} onChange={(v) => { setSearch(v); setActive(0); }} placeholder="Filter categories…" inputRef={searchRef} />
-          <div ref={list} role="listbox" className="scrollbar-thin max-h-64 overflow-y-auto">
+          <div ref={list} role="listbox" className={cn("scrollbar-thin overflow-y-auto", tall ? "max-h-[min(28rem,60vh)]" : "max-h-64")}>
             {items.length === 0 ? (
               <div className="py-4 text-center text-xs text-faint">No matching categories</div>
             ) : (

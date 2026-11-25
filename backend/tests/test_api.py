@@ -150,6 +150,32 @@ def test_investments_portfolio_and_oversell_guard(client, bank):
     assert bal["Bank"] == 100_000_00 - 10_000_00
 
 
+def test_vest_adds_shares_without_touching_accounts_or_invested(client, bank):
+    qcom = client.post("/api/investments/instruments", json={
+        "kind": "stock", "name": "Qualcomm", "symbol": "QCOM", "exchange": "NASDAQ",
+    }).json()
+    base = {"instrument_id": qcom["id"], "date": TODAY.isoformat(), "type": "vest", "units": "10", "amount": 1_50_000_00}
+
+    # A vest is never paid from an account, and needs units
+    assert client.post("/api/investments/txns", json={**base, "account_id": bank["id"]}).status_code == 422
+    assert client.post("/api/investments/txns", json={**base, "units": None}).status_code == 422
+    assert client.post("/api/investments/txns", json=base).status_code == 201
+
+    h = client.get("/api/investments/portfolio").json()["holdings"][0]
+    assert h["units"] == "10" and h["invested"] == 1_50_000_00
+
+    # Vested shares can be sold like bought ones (FIFO cost = vest value)
+    r = client.post("/api/investments/txns", json={**base, "type": "sell", "units": "4", "amount": 70_000_00})
+    assert r.status_code == 201, r.text
+    h = client.get("/api/investments/portfolio").json()["holdings"][0]
+    assert h["units"] == "6" and h["realized"] == 70_000_00 - 60_000_00
+
+    # Bank balance untouched; Overview's "invested" excludes vests
+    bal = {a["name"]: a["balance"] for a in client.get("/api/accounts").json()}
+    assert bal["Bank"] == 100_000_00
+    assert client.get("/api/dashboard", params={"month": MONTH}).json()["invested"] == 0
+
+
 def test_dashboard_numbers(client, bank, cats):
     add_txn(client, kind="income", amount=80_000_00, account_id=bank["id"], category_id=cats["Salary"]["id"])
     add_txn(client, kind="expense", amount=20_000_00, account_id=bank["id"], category_id=cats["Rent"]["id"])

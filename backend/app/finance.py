@@ -160,7 +160,7 @@ def compute_holding(txns: list[InvTxnInput]) -> HoldingResult:
 
     Same-day ordering: buys before sells, so a same-day buy-and-sell works.
     """
-    order = {"buy": 0, "dividend": 1, "sell": 2}
+    order = {"buy": 0, "vest": 0, "dividend": 1, "sell": 2}
     ordered = sorted(txns, key=lambda t: (t.date, order.get(t.type, 9), t.id or 0))
 
     res = HoldingResult()
@@ -169,9 +169,9 @@ def compute_holding(txns: list[InvTxnInput]) -> HoldingResult:
     for t in ordered:
         if res.first_date is None:
             res.first_date = t.date
-        if t.type == "buy":
+        if t.type in ("buy", "vest"):
             if t.units is None or t.units <= 0:
-                raise HoldingError("buy needs a positive number of units")
+                raise HoldingError(f"{t.type} needs a positive number of units")
             lots.append(_Lot(t.date, t.units, t.amount))
             res.total_bought += t.amount
             res.flows.append((t.date, -t.amount))

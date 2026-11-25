@@ -153,6 +153,7 @@ export default function Transactions() {
           cats={cats}
           placeholder="All categories"
           className="w-auto min-w-[160px] max-w-56"
+          tall
         />
       </Card>
       </div>

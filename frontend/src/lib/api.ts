@@ -101,7 +101,7 @@ export interface InvTxn {
   instrument_id: number;
   account_id: number | null;
   date: string;
-  type: "buy" | "sell" | "dividend";
+  type: "buy" | "sell" | "dividend" | "vest";
   units: string | null;
   price: string | null;
   amount: number;

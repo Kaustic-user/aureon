@@ -61,6 +61,9 @@ class InvTxnType(StrEnum):
     buy = "buy"
     sell = "sell"
     dividend = "dividend"
+    # Shares received from an employer (RSU/ESPP vest). Adds units at market
+    # value like a buy, but no money leaves any account.
+    vest = "vest"
 
 
 class Frequency(StrEnum):
@@ -164,7 +167,8 @@ class InvestmentTxn(Base):
     type: Mapped[str] = mapped_column(String(10))
     units: Mapped[Decimal | None] = mapped_column(DecimalText, nullable=True)
     price: Mapped[Decimal | None] = mapped_column(DecimalText, nullable=True)
-    # buy: total paid incl. charges; sell: net proceeds; dividend: received.
+    # buy: total paid incl. charges; vest: market value on vest date;
+    # sell: net proceeds; dividend: received.
     amount: Mapped[int] = mapped_column(Integer)
     note: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

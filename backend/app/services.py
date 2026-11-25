@@ -129,7 +129,7 @@ def account_balances(session: Session, as_of: date | None = None) -> dict[int, i
 
     q = (
         select(InvestmentTxn.account_id, InvestmentTxn.type, func.sum(InvestmentTxn.amount))
-        .where(InvestmentTxn.account_id.is_not(None))
+        .where(InvestmentTxn.account_id.is_not(None), InvestmentTxn.type != "vest")
         .group_by(InvestmentTxn.account_id, InvestmentTxn.type)
     )
     if as_of:
