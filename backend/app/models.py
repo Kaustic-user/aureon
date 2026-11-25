@@ -21,8 +21,10 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    func,
+    select,
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, column_property, mapped_column, relationship
 
 from .db import Base, DecimalText
 
@@ -95,16 +97,43 @@ class Category(Base):
     archived: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class Friend(Base):
+    """Someone you split bills with. Their balance is derived, never typed in
+    (apart from the opening balance, for what was owed before you started)."""
+
+    __tablename__ = "friends"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(60))
+    # Positive: they owed you this when you started. Negative: you owed them.
+    opening_balance: Mapped[int] = mapped_column(Integer, default=0)
+    archived: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class Transaction(Base):
+    """One money event.
+
+    With a friend involved (friend_id set), one side is the friend instead of
+    an account:
+      expense, no account   -> the friend paid your share (you owe them), or a write-off
+      income,  no account   -> the friend let go of what you owed them
+      transfer, from account -> you paid the friend (settle up / lend)
+      transfer, to account   -> the friend paid you back
+    Splits (TransactionSplit) are friends' shares of an expense you paid.
+    """
+
     __tablename__ = "transactions"
     __table_args__ = (CheckConstraint("amount > 0", name="ck_transactions_amount_positive"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     date: Mapped[date] = mapped_column(Date, index=True)
     kind: Mapped[str] = mapped_column(String(10))
+    # Full amount that moved. For a split expense your own share is own_amount.
     amount: Mapped[int] = mapped_column(Integer)
-    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), index=True)
+    account_id: Mapped[int | None] = mapped_column(ForeignKey("accounts.id"), nullable=True, index=True)
     to_account_id: Mapped[int | None] = mapped_column(ForeignKey("accounts.id"), nullable=True)
+    friend_id: Mapped[int | None] = mapped_column(ForeignKey("friends.id"), nullable=True, index=True)
     category_id: Mapped[int | None] = mapped_column(
         ForeignKey("categories.id"), nullable=True, index=True
     )
@@ -113,6 +142,38 @@ class Transaction(Base):
     source: Mapped[str] = mapped_column(String(20), default="manual")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    splits: Mapped[list[TransactionSplit]] = relationship(
+        viewonly=True, lazy="selectin", order_by="TransactionSplit.id"
+    )
+
+
+class TransactionSplit(Base):
+    """A friend's share of an expense you paid: they owe you this much."""
+
+    __tablename__ = "transaction_splits"
+    __table_args__ = (
+        CheckConstraint("amount > 0", name="ck_transaction_splits_amount_positive"),
+        UniqueConstraint("transaction_id", "friend_id", name="uq_transaction_splits_txn_friend"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    transaction_id: Mapped[int] = mapped_column(
+        ForeignKey("transactions.id", ondelete="CASCADE"), index=True
+    )
+    friend_id: Mapped[int] = mapped_column(ForeignKey("friends.id"), index=True)
+    amount: Mapped[int] = mapped_column(Integer)
+
+
+# Your own part of a transaction: the amount minus friends' shares. Every
+# spending/income report uses this; account balances use the full amount.
+Transaction.own_amount = column_property(
+    Transaction.amount
+    - select(func.coalesce(func.sum(TransactionSplit.amount), 0))
+    .where(TransactionSplit.transaction_id == Transaction.id)
+    .correlate_except(TransactionSplit)
+    .scalar_subquery()
+)
 
 
 class Budget(Base):

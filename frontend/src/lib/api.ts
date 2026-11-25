@@ -23,20 +23,58 @@ export interface Category {
   archived: boolean;
 }
 
+export interface Split {
+  friend_id: number;
+  amount: number;
+}
+
+/**
+ * With a friend (friend_id) one side is the friend instead of an account:
+ * expense/income with no account = the friend paid your share / let go of what you owed;
+ * transfer from account_id = you paid them; transfer to to_account_id = they paid you.
+ */
 export interface Txn {
   id: number;
   date: string;
   kind: TxnKind;
+  /** Full amount that moved. */
   amount: number;
-  account_id: number;
+  /** Your part: amount minus friends' shares. */
+  own_amount: number;
+  account_id: number | null;
   to_account_id: number | null;
+  friend_id: number | null;
   category_id: number | null;
   merchant: string | null;
   note: string | null;
   source: string;
+  splits: Split[];
 }
 
-export type TxnIn = Omit<Txn, "id" | "source">;
+export type TxnIn = Omit<Txn, "id" | "source" | "own_amount" | "friend_id" | "splits"> & {
+  friend_id?: number | null;
+  splits?: Split[];
+};
+
+export interface Friend {
+  id: number;
+  name: string;
+  opening_balance: number;
+  archived: boolean;
+  /** Positive: they owe you. Negative: you owe them. */
+  balance: number;
+  last_activity: string | null;
+}
+
+/** How a transaction moves what `friendId` owes you (positive = they owe you more). */
+export function friendEffect(t: Txn, friendId: number): number {
+  if (t.friend_id === friendId) {
+    if (t.kind === "expense") return -t.amount;
+    if (t.kind === "income") return t.amount;
+    return t.account_id != null ? t.amount : -t.amount;
+  }
+  return t.splits.find((s) => s.friend_id === friendId)?.amount ?? 0;
+}
 
 export interface TxnPage {
   items: Txn[];

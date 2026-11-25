@@ -22,11 +22,13 @@ from .models import (
     AuditLog,
     Budget,
     Category,
+    Friend,
     Instrument,
     InvestmentTxn,
     PriceSnapshot,
     RecurringRule,
     Transaction,
+    TransactionSplit,
 )
 from .schemas import (
     BudgetMonth,
@@ -115,6 +117,8 @@ def account_balances(session: Session, as_of: date | None = None) -> dict[int, i
     if as_of:
         q = q.where(Transaction.date <= as_of)
     for account_id, kind, total in session.execute(q):
+        if account_id is None:  # a friend paid, or a friend paid you back: no account left money
+            continue
         bal[account_id] = bal.get(account_id, 0) + (total if kind == "income" else -total)
 
     q = (
@@ -138,6 +142,64 @@ def account_balances(session: Session, as_of: date | None = None) -> dict[int, i
         bal[account_id] = bal.get(account_id, 0) + (-total if typ == "buy" else total)
 
     return bal
+
+
+# ---------------------------------------------------------------- friends
+
+
+def friend_effect(kind: str, account_id: int | None, amount: int) -> int:
+    """How a friend transaction moves the balance (positive = they owe you more).
+
+    expense, no account: they paid your share (or you wrote off what they owed)
+    income, no account:  they let go of what you owed them
+    transfer from your account: you paid them; transfer into it: they paid you
+    """
+    if kind == "expense":
+        return -amount
+    if kind == "income":
+        return amount
+    return amount if account_id is not None else -amount
+
+
+def friend_balances(session: Session, as_of: date | None = None) -> dict[int, int]:
+    """What each friend owes you (negative: what you owe them), in paise."""
+    bal = {f.id: f.opening_balance for f in session.scalars(select(Friend))}
+
+    q = (
+        select(TransactionSplit.friend_id, func.sum(TransactionSplit.amount))
+        .join(Transaction, Transaction.id == TransactionSplit.transaction_id)
+        .group_by(TransactionSplit.friend_id)
+    )
+    if as_of:
+        q = q.where(Transaction.date <= as_of)
+    for fid, total in session.execute(q):
+        bal[fid] = bal.get(fid, 0) + total
+
+    q = select(Transaction.friend_id, Transaction.kind, Transaction.account_id, Transaction.amount).where(
+        Transaction.friend_id.is_not(None)
+    )
+    if as_of:
+        q = q.where(Transaction.date <= as_of)
+    for fid, kind, account_id, amount in session.execute(q):
+        bal[fid] = bal.get(fid, 0) + friend_effect(kind, account_id, amount)
+    return bal
+
+
+def friend_last_activity(session: Session) -> dict[int, date]:
+    out: dict[int, date] = {}
+    for fid, d in session.execute(
+        select(Transaction.friend_id, func.max(Transaction.date))
+        .where(Transaction.friend_id.is_not(None))
+        .group_by(Transaction.friend_id)
+    ):
+        out[fid] = d
+    for fid, d in session.execute(
+        select(TransactionSplit.friend_id, func.max(Transaction.date))
+        .join(Transaction, Transaction.id == TransactionSplit.transaction_id)
+        .group_by(TransactionSplit.friend_id)
+    ):
+        out[fid] = max(out.get(fid, d), d)
+    return out
 
 
 # -------------------------------------------------------------- categories
@@ -365,7 +427,7 @@ def daily_spend(session: Session, month: str, today: date | None = None) -> list
     def cumulative(m: str) -> dict[int, int]:
         ms, me = finance.month_bounds(m)
         rows = session.execute(
-            select(Transaction.date, func.sum(Transaction.amount))
+            select(Transaction.date, func.sum(Transaction.own_amount))
             .where(Transaction.kind == "expense", Transaction.date >= ms, Transaction.date <= me)
             .group_by(Transaction.date)
         ).all()
@@ -390,7 +452,7 @@ def daily_spend(session: Session, month: str, today: date | None = None) -> list
 
 def _month_sums(session: Session, start: date, end: date) -> tuple[int, int]:
     q = (
-        select(Transaction.kind, func.sum(Transaction.amount))
+        select(Transaction.kind, func.sum(Transaction.own_amount))
         .where(Transaction.date >= start, Transaction.date <= end, Transaction.kind != "transfer")
         .group_by(Transaction.kind)
     )
@@ -402,7 +464,7 @@ def spend_by_top_category(session: Session, start: date, end: date) -> dict[int 
     rollup = category_rollup_map(session)
     out: dict[int | None, int] = defaultdict(int)
     q = (
-        select(Transaction.category_id, func.sum(Transaction.amount))
+        select(Transaction.category_id, func.sum(Transaction.own_amount))
         .where(Transaction.kind == "expense", Transaction.date >= start, Transaction.date <= end)
         .group_by(Transaction.category_id)
     )
@@ -429,7 +491,7 @@ def budget_month(session: Session, month: str, today: date | None = None) -> Bud
         if cat and cat.parent_id is not None:
             ids = descendant_ids(session, cid)
             sub_spent[cid] = session.scalar(
-                select(func.coalesce(func.sum(Transaction.amount), 0)).where(
+                select(func.coalesce(func.sum(Transaction.own_amount), 0)).where(
                     Transaction.kind == "expense",
                     Transaction.category_id.in_(ids),
                     Transaction.date >= start,
@@ -517,7 +579,7 @@ def dashboard(session: Session, month: str, today: date | None = None) -> dict:
     # Income split by category (top 2 for the KPI caption)
     rollup = category_rollup_map(session)
     inc_q = (
-        select(Transaction.category_id, func.sum(Transaction.amount))
+        select(Transaction.category_id, func.sum(Transaction.own_amount))
         .where(Transaction.kind == "income", Transaction.date >= start, Transaction.date <= end)
         .group_by(Transaction.category_id)
     )
@@ -540,7 +602,7 @@ def dashboard(session: Session, month: str, today: date | None = None) -> dict:
     inputs = _inv_inputs(session)
 
     def net_worth_at(d: date) -> int:
-        return sum(account_balances(session, d).values()) + portfolio_value_at(d, inputs, prices)
+        return sum(account_balances(session, d).values()) + sum(friend_balances(session, d).values()) + portfolio_value_at(d, inputs, prices)
 
     first_dates = [
         d
@@ -586,7 +648,7 @@ def dashboard(session: Session, month: str, today: date | None = None) -> dict:
     top_q = (
         select(Transaction)
         .where(Transaction.date >= start, Transaction.date <= end, Transaction.kind != "transfer")
-        .order_by(Transaction.amount.desc(), Transaction.date.desc())
+        .order_by(Transaction.own_amount.desc(), Transaction.date.desc())
         .limit(10)
     )
     top = [
@@ -594,7 +656,7 @@ def dashboard(session: Session, month: str, today: date | None = None) -> dict:
             "id": t.id,
             "date": t.date.isoformat(),
             "kind": t.kind,
-            "amount": t.amount,
+            "amount": t.own_amount,
             "merchant": t.merchant,
             "note": t.note,
             "category": cats[t.category_id].name if t.category_id in cats else None,

@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type Account, type Category, type Dashboard, type Instrument, type Portfolio, type PortfolioPoint, type Recurring, type Txn, type TxnIn, type UpcomingItem } from "./api";
+import { api, type Account, type Category, type Dashboard, type Friend, type Instrument, type Portfolio, type PortfolioPoint, type Recurring, type Txn, type TxnIn, type UpcomingItem } from "./api";
 
 export const useAccounts = () => useQuery({ queryKey: ["accounts"], queryFn: () => api.get<Account[]>("/accounts") });
+export const useFriends = () => useQuery({ queryKey: ["friends"], queryFn: () => api.get<Friend[]>("/friends") });
 export const useCategories = () => useQuery({ queryKey: ["categories"], queryFn: () => api.get<Category[]>("/categories") });
 export const useDashboard = (month: string) =>
   useQuery({ queryKey: ["dashboard", month], queryFn: () => api.get<Dashboard>("/dashboard", { month }), placeholderData: (p) => p });

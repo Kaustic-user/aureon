@@ -10,7 +10,7 @@ import { Amount, Button, Card, Empty, ErrorNote, Input, PageHeader, Select, Skel
 import { useActions } from "../lib/actions";
 import { api, type Txn, type TxnPage } from "../lib/api";
 import { currentMonth, dayHeading, money, monthLabel } from "../lib/format";
-import { categoryIndex, useAccounts, useCategories } from "../lib/queries";
+import { categoryIndex, useAccounts, useCategories, useFriends } from "../lib/queries";
 import { useMonthParam } from "../lib/useMonth";
 import { rangeLabel, useRangeParam } from "../lib/useRange";
 import { cn } from "../lib/utils";
@@ -25,11 +25,14 @@ export default function Transactions() {
   const { data: accounts = [] } = useAccounts();
   const { data: cats = [] } = useCategories();
   const idx = useMemo(() => categoryIndex(cats), [cats]);
+  const { data: friends = [] } = useFriends();
   const accName = useMemo(() => new Map(accounts.map((a) => [a.id, a.name])), [accounts]);
+  const friendName = useMemo(() => new Map(friends.map((f) => [f.id, f.name])), [friends]);
 
   const kind = params.get("kind") ?? "";
   const accountId = params.get("account_id") ?? "";
   const categoryId = params.get("category_id") ?? "";
+  const friendId = params.get("friend_id") ?? "";
   const [q, setQ] = useState(params.get("q") ?? "");
   const [debouncedQ, setDebouncedQ] = useState(q);
   const [limit, setLimit] = useState(PAGE);
@@ -37,7 +40,7 @@ export default function Transactions() {
     const t = setTimeout(() => setDebouncedQ(q.trim()), 250);
     return () => clearTimeout(t);
   }, [q]);
-  useEffect(() => setLimit(PAGE), [month, range?.start, range?.end, kind, accountId, categoryId, debouncedQ]);
+  useEffect(() => setLimit(PAGE), [month, range?.start, range?.end, kind, accountId, categoryId, friendId, debouncedQ]);
 
   const setParam = (k: string, v: string) =>
     setParams((p) => {
@@ -74,7 +77,7 @@ export default function Transactions() {
   }, []);
 
   const { data, error, isLoading, isFetching } = useQuery({
-    queryKey: ["transactions", month, range?.start, range?.end, kind, accountId, categoryId, debouncedQ, limit],
+    queryKey: ["transactions", month, range?.start, range?.end, kind, accountId, categoryId, friendId, debouncedQ, limit],
     queryFn: () =>
       api.get<TxnPage>("/transactions", {
         // A search looks across all time; otherwise scope to the custom range or the month.
@@ -84,6 +87,7 @@ export default function Transactions() {
         kind,
         account_id: accountId,
         category_id: categoryId,
+        friend_id: friendId,
         q: debouncedQ,
         limit,
       }),
@@ -96,12 +100,12 @@ export default function Transactions() {
       let g = out[out.length - 1];
       if (!g || g.date !== t.date) out.push((g = { date: t.date, items: [], net: 0 }));
       g.items.push(t);
-      g.net += t.kind === "income" ? t.amount : t.kind === "expense" ? -t.amount : 0;
+      g.net += t.kind === "income" ? t.own_amount : t.kind === "expense" ? -t.own_amount : 0;
     }
     return out;
   }, [data]);
 
-  const filtered = kind || accountId || categoryId || debouncedQ;
+  const filtered = kind || accountId || categoryId || friendId || debouncedQ;
 
   return (
     <>
@@ -155,6 +159,14 @@ export default function Transactions() {
           className="w-auto min-w-[160px] max-w-56"
           tall
         />
+        {(friends.length > 0 || friendId) && (
+          <Select value={friendId} onChange={(e) => setParam("friend_id", e.target.value)} className="w-auto">
+            <option value="">All friends</option>
+            {friends.map((f) => (
+              <option key={f.id} value={f.id}>{f.name}</option>
+            ))}
+          </Select>
+        )}
       </Card>
       </div>
 
@@ -164,6 +176,7 @@ export default function Transactions() {
           {kind && <Chip label={{ expense: "Expenses", income: "Income", transfer: "Transfers" }[kind] ?? kind} onRemove={() => setParam("kind", "")} />}
           {accountId && <Chip label={accName.get(Number(accountId)) ?? "Account"} onRemove={() => setParam("account_id", "")} />}
           {categoryId && <Chip label={idx.byId.get(Number(categoryId))?.name ?? "Category"} onRemove={() => setParam("category_id", "")} />}
+          {friendId && <Chip label={`With ${friendName.get(Number(friendId)) ?? "friend"}`} onRemove={() => setParam("friend_id", "")} />}
           <button
             className="text-faint underline-offset-2 hover:text-zinc-200 hover:underline"
             onClick={() => {
@@ -226,22 +239,27 @@ export default function Transactions() {
                           )}
                           <span className="min-w-0 flex-1">
                             <span className="block truncate text-sm">
-                              {t.merchant ?? (t.kind === "transfer" ? "Transfer" : c?.name ?? "Untitled")}
+                              {t.merchant ?? (t.kind === "transfer" ? (t.friend_id != null ? "Settle up" : "Transfer") : c?.name ?? "Untitled")}
                             </span>
                             <span className="block truncate text-xs text-faint">
-                              {t.kind === "transfer"
-                                ? `${accName.get(t.account_id)} → ${accName.get(t.to_account_id!)}`
-                                : `${c?.name ?? "Uncategorised"} · ${accName.get(t.account_id) ?? ""}`}
+                              {subtitle(t, c?.name, (id) => (id == null ? "" : accName.get(id) ?? "Account"), (id) => friendName.get(id) ?? "Friend")}
                               {t.note ? ` · ${t.note}` : ""}
                             </span>
                           </span>
-                          <Amount
-                            value={t.amount}
-                            kind={t.kind === "transfer" ? undefined : t.kind}
-                            sign={t.kind !== "transfer"}
-                            exact={t.amount % 100 !== 0}
-                            className={cn("text-sm", t.kind === "transfer" && "text-muted")}
-                          />
+                          <span className="shrink-0 text-right">
+                            <Amount
+                              value={t.own_amount}
+                              kind={t.kind === "transfer" ? undefined : t.kind}
+                              sign={t.kind !== "transfer"}
+                              exact={t.own_amount % 100 !== 0}
+                              className={cn("block text-sm", t.kind === "transfer" && "text-muted")}
+                            />
+                            {t.splits.length > 0 && (
+                              <span className="block text-[11px] text-faint">
+                                of <Amount value={t.amount} exact={t.amount % 100 !== 0} />
+                              </span>
+                            )}
+                          </span>
                         </button>
                       </li>
                     );
@@ -261,6 +279,19 @@ export default function Transactions() {
       </Card>
     </>
   );
+}
+
+/** "Food · HDFC · split with Asha, Ben", "Food · paid by Asha", "HDFC → Asha"… */
+function subtitle(t: Txn, category: string | undefined, acc: (id: number | null) => string, friend: (id: number) => string): string {
+  const f = t.friend_id != null ? friend(t.friend_id) : null;
+  if (t.kind === "transfer") {
+    if (f) return t.account_id != null ? `${acc(t.account_id)} → ${f} · settle up` : `${f} → ${acc(t.to_account_id)} · settle up`;
+    return `${acc(t.account_id)} → ${acc(t.to_account_id)}`;
+  }
+  const cat = category ?? "Uncategorised";
+  if (f) return t.kind === "expense" ? `${cat} · paid by ${f}` : `${cat} · ${f} let it go`;
+  const split = t.splits.length ? ` · split with ${t.splits.map((s) => friend(s.friend_id)).join(", ")}` : "";
+  return `${cat} · ${acc(t.account_id)}${split}`;
 }
 
 function Summary({ label, value }: { label: string; value: React.ReactNode }) {

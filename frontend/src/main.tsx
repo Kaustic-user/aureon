@@ -15,6 +15,7 @@ const Overview = lazy(() => import("./pages/Overview"));
 const Transactions = lazy(() => import("./pages/Transactions"));
 const Budgets = lazy(() => import("./pages/Budgets"));
 const Accounts = lazy(() => import("./pages/Accounts"));
+const Friends = lazy(() => import("./pages/Friends"));
 const Investments = lazy(() => import("./pages/Investments"));
 
 const queryClient = new QueryClient({
@@ -36,6 +37,7 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="transactions" element={<Transactions />} />
                 <Route path="budgets" element={<Budgets />} />
                 <Route path="accounts" element={<Accounts />} />
+                <Route path="friends" element={<Friends />} />
                 <Route path="investments" element={<Investments />} />
                 <Route path="*" element={<Empty title="Page not found" />} />
               </Route>

@@ -11,6 +11,7 @@ import {
   Search,
   Sun,
   TrendingUp,
+  Users,
   Wallet,
   X,
 } from "lucide-react";
@@ -30,6 +31,7 @@ const NAV: { group: string; items: { to: string; label: string; icon: ReactNode 
       { to: "/transactions", label: "Transactions", icon: <ArrowLeftRight className="h-4 w-4" /> },
       { to: "/budgets", label: "Budgets", icon: <PiggyBank className="h-4 w-4" /> },
       { to: "/accounts", label: "Accounts", icon: <Wallet className="h-4 w-4" /> },
+      { to: "/friends", label: "Friends", icon: <Users className="h-4 w-4" /> },
     ],
   },
   {

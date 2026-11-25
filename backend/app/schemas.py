@@ -69,15 +69,29 @@ class CategoryOut(ORM):
 # ------------------------------------------------------------ transactions
 
 
+class SplitIn(BaseModel):
+    friend_id: int
+    amount: Paise
+
+
+class SplitOut(ORM):
+    friend_id: int
+    amount: int
+
+
 class TransactionIn(BaseModel):
     date: date
     kind: TxnKind
     amount: Paise
-    account_id: int
+    # Null only when a friend is the other side (see models.Transaction).
+    account_id: int | None = None
     to_account_id: int | None = None
+    friend_id: int | None = None
     category_id: int | None = None
     merchant: Annotated[str | None, StringConstraints(strip_whitespace=True, max_length=120)] = None
     note: OptText = None
+    # Friends' shares of an expense you paid. Saving replaces the whole list.
+    splits: list[SplitIn] = Field(default_factory=list, max_length=50)
 
 
 class TransactionOut(ORM):
@@ -85,12 +99,15 @@ class TransactionOut(ORM):
     date: date
     kind: str
     amount: int
-    account_id: int
+    own_amount: int
+    account_id: int | None
     to_account_id: int | None
+    friend_id: int | None
     category_id: int | None
     merchant: str | None
     note: str | None
     source: str
+    splits: list[SplitOut]
 
 
 class TransactionPage(BaseModel):
@@ -98,6 +115,25 @@ class TransactionPage(BaseModel):
     total: int
     sum_income: int
     sum_expense: int
+
+
+# ----------------------------------------------------------------- friends
+
+
+class FriendIn(BaseModel):
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60)]
+    opening_balance: int = Field(default=0, gt=-(10**15), lt=10**15)
+    archived: bool = False
+
+
+class FriendOut(ORM):
+    id: int
+    name: str
+    opening_balance: int
+    archived: bool
+    # Positive: they owe you. Negative: you owe them.
+    balance: int = 0
+    last_activity: date | None = None
 
 
 # ----------------------------------------------------------------- budgets

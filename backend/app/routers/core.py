@@ -5,12 +5,12 @@ from __future__ import annotations
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from .. import finance, services
 from ..db import get_session
-from ..models import Account, Budget, Category, RecurringRule, Transaction
+from ..models import Account, Budget, Category, Friend, RecurringRule, Transaction, TransactionSplit
 from ..schemas import (
     AccountIn,
     AccountOut,
@@ -18,6 +18,8 @@ from ..schemas import (
     BudgetMonth,
     CategoryIn,
     CategoryOut,
+    FriendIn,
+    FriendOut,
     RecurringIn,
     RecurringOut,
     TransactionIn,
@@ -29,7 +31,7 @@ from ..schemas import (
 router = APIRouter()
 DB = Depends(get_session)
 
-TXN_FIELDS = ["date", "kind", "amount", "account_id", "to_account_id", "category_id", "merchant", "note"]
+TXN_FIELDS = ["date", "kind", "amount", "account_id", "to_account_id", "friend_id", "category_id", "merchant", "note"]
 
 
 def _get(session: Session, model, obj_id: int, label: str):
@@ -100,6 +102,80 @@ def delete_account(account_id: int, session: Session = DB):
     return Response(status_code=204)
 
 
+# ------------------------------------------------------------------- friends
+
+
+def _friend_out(session: Session, friend: Friend) -> FriendOut:
+    return FriendOut.model_validate(friend).model_copy(
+        update={
+            "balance": services.friend_balances(session).get(friend.id, 0),
+            "last_activity": services.friend_last_activity(session).get(friend.id),
+        }
+    )
+
+
+def _check_friend_name(session: Session, name: str, self_id: int | None = None) -> None:
+    clash = session.scalar(
+        select(Friend).where(func.lower(Friend.name) == name.lower(), Friend.id != (self_id or 0))
+    )
+    if clash:
+        raise HTTPException(409, f"You already have a friend called {clash.name}")
+
+
+@router.get("/friends", response_model=list[FriendOut])
+def list_friends(session: Session = DB):
+    balances = services.friend_balances(session)
+    last = services.friend_last_activity(session)
+    friends = session.scalars(select(Friend).order_by(Friend.archived, func.lower(Friend.name))).all()
+    return [
+        FriendOut.model_validate(f).model_copy(update={"balance": balances.get(f.id, 0), "last_activity": last.get(f.id)})
+        for f in friends
+    ]
+
+
+@router.post("/friends", response_model=FriendOut, status_code=201)
+def create_friend(body: FriendIn, session: Session = DB):
+    _check_friend_name(session, body.name)
+    friend = Friend(**body.model_dump())
+    session.add(friend)
+    session.flush()
+    services.audit(session, "friend", friend.id, "create", body.model_dump(mode="json"))
+    session.commit()
+    return _friend_out(session, friend)
+
+
+@router.put("/friends/{friend_id}", response_model=FriendOut)
+def update_friend(friend_id: int, body: FriendIn, session: Session = DB):
+    friend = _get(session, Friend, friend_id, "friend")
+    _check_friend_name(session, body.name, self_id=friend_id)
+    if body.archived and not friend.archived:
+        balance = services.friend_balances(session).get(friend_id, 0) - friend.opening_balance + body.opening_balance
+        if balance != 0:
+            who = f"{friend.name} owes you" if balance > 0 else f"You owe {friend.name}"
+            raise HTTPException(409, f"{who} {_rupees(abs(balance))}. Settle up or write it off before archiving.")
+    before = services.snapshot(friend, list(FriendIn.model_fields))
+    for k, v in body.model_dump().items():
+        setattr(friend, k, v)
+    services.audit(session, "friend", friend.id, "update", {"before": before, "after": body.model_dump(mode="json")})
+    session.commit()
+    return _friend_out(session, friend)
+
+
+@router.delete("/friends/{friend_id}", status_code=204)
+def delete_friend(friend_id: int, session: Session = DB):
+    friend = _get(session, Friend, friend_id, "friend")
+    used = session.scalar(select(func.count()).select_from(Transaction).where(Transaction.friend_id == friend_id))
+    used = used or session.scalar(
+        select(func.count()).select_from(TransactionSplit).where(TransactionSplit.friend_id == friend_id)
+    )
+    if used:
+        raise HTTPException(409, f"{friend.name} has transactions. Archive them instead, so history is kept.")
+    services.audit(session, "friend", friend.id, "delete", services.snapshot(friend, ["name", "opening_balance"]))
+    session.delete(friend)
+    session.commit()
+    return Response(status_code=204)
+
+
 # ---------------------------------------------------------------- categories
 
 
@@ -158,25 +234,100 @@ def delete_category(category_id: int, session: Session = DB):
 # -------------------------------------------------------------- transactions
 
 
+def _rupees(paise: int) -> str:
+    return f"₹{paise / 100:,.2f}"
+
+
 def _validate_txn(session: Session, body: TransactionIn, existing: Transaction | None = None) -> None:
-    acct = _get(session, Account, body.account_id, "account")
-    if acct.archived and (existing is None or existing.account_id != acct.id):
-        raise HTTPException(422, "Account is archived")
+    # Archived accounts/friends can't be newly used, but an edit may keep the ones it already had.
+    had_accounts = {existing.account_id, existing.to_account_id} - {None} if existing else set()
+    had_friends = ({existing.friend_id} | {s.friend_id for s in existing.splits}) - {None} if existing else set()
+
+    def check_account(acct_id: int | None, label: str) -> None:
+        if acct_id is None:
+            return
+        acct = _get(session, Account, acct_id, label)
+        if acct.archived and acct_id not in had_accounts:
+            raise HTTPException(422, f"Account '{acct.name}' is archived")
+
+    def check_friend(friend_id: int) -> None:
+        friend = _get(session, Friend, friend_id, "friend")
+        if friend.archived and friend_id not in had_friends:
+            raise HTTPException(422, f"{friend.name} is archived. Restore them on the Friends page first.")
+
+    check_account(body.account_id, "account")
+    check_account(body.to_account_id, "destination account")
+    if body.friend_id is not None:
+        check_friend(body.friend_id)
+
     if body.kind == "transfer":
-        if body.to_account_id is None:
-            raise HTTPException(422, "Transfer needs a destination account")
-        if body.to_account_id == body.account_id:
-            raise HTTPException(422, "Transfer needs two different accounts")
-        _get(session, Account, body.to_account_id, "destination account")
         if body.category_id is not None:
             raise HTTPException(422, "Transfers do not have a category")
+        if body.splits:
+            raise HTTPException(422, "Transfers cannot be split")
+        if body.friend_id is None:
+            if body.account_id is None:
+                raise HTTPException(422, "Transfer needs a source account")
+            if body.to_account_id is None:
+                raise HTTPException(422, "Transfer needs a destination account")
+            if body.to_account_id == body.account_id:
+                raise HTTPException(422, "Transfer needs two different accounts")
+        elif (body.account_id is None) == (body.to_account_id is None):
+            raise HTTPException(
+                422, "Settling up moves money between a friend and one of your accounts: pick exactly one account"
+            )
+        return
+
+    if body.to_account_id is not None:
+        raise HTTPException(422, "Only transfers have a destination account")
+    if body.category_id is not None:
+        cat = _get(session, Category, body.category_id, "category")
+        if cat.kind != body.kind:
+            raise HTTPException(422, f"Category '{cat.name}' is for {cat.kind}, not {body.kind}")
+
+    if body.friend_id is None:
+        if body.account_id is None:
+            raise HTTPException(422, "Pick the account the money came from or went to")
     else:
-        if body.to_account_id is not None:
-            raise HTTPException(422, "Only transfers have a destination account")
-        if body.category_id is not None:
-            cat = _get(session, Category, body.category_id, "category")
-            if cat.kind != body.kind:
-                raise HTTPException(422, f"Category '{cat.name}' is for {cat.kind}, not {body.kind}")
+        if body.account_id is not None:
+            raise HTTPException(422, "When a friend paid, no money moves in your accounts: leave the account empty")
+        if body.splits:
+            raise HTTPException(422, "A bill a friend paid cannot also be split. Record only your share.")
+
+    if body.splits:
+        if body.kind != "expense":
+            raise HTTPException(422, "Only expenses can be split")
+        ids = [s.friend_id for s in body.splits]
+        if len(ids) != len(set(ids)):
+            raise HTTPException(422, "Each friend can appear only once in a split")
+        for fid in ids:
+            check_friend(fid)
+        shared = sum(s.amount for s in body.splits)
+        if shared > body.amount:
+            raise HTTPException(
+                422, f"Friends' shares ({_rupees(shared)}) add up to more than the total ({_rupees(body.amount)})"
+            )
+
+
+def _txn_snapshot(txn: Transaction) -> dict:
+    snap = services.snapshot(txn, TXN_FIELDS)
+    snap["splits"] = sorted((s.friend_id, s.amount) for s in txn.splits)
+    return snap
+
+
+def _save_splits(session: Session, txn: Transaction, splits) -> None:
+    """Replace the transaction's splits (delete first: (txn, friend) is unique)."""
+    session.execute(delete(TransactionSplit).where(TransactionSplit.transaction_id == txn.id))
+    session.flush()
+    for s in splits:
+        session.add(TransactionSplit(transaction_id=txn.id, friend_id=s.friend_id, amount=s.amount))
+    session.flush()
+    session.expire(txn)
+
+
+def _out(session: Session, txn: Transaction) -> TransactionOut:
+    session.refresh(txn)
+    return TransactionOut.model_validate(txn)
 
 
 @router.get("/transactions", response_model=TransactionPage)
@@ -188,6 +339,7 @@ def list_transactions(
     account_id: int | None = None,
     category_id: int | None = None,
     kind: str | None = None,
+    friend_id: int | None = None,
     q: str | None = Query(default=None, max_length=100),
     min_amount: int | None = None,
     max_amount: int | None = None,
@@ -208,6 +360,13 @@ def list_transactions(
         conds.append(Transaction.category_id.in_(services.descendant_ids(session, category_id)))
     if kind:
         conds.append(Transaction.kind == kind)
+    if friend_id:
+        conds.append(
+            or_(
+                Transaction.friend_id == friend_id,
+                Transaction.id.in_(select(TransactionSplit.transaction_id).where(TransactionSplit.friend_id == friend_id)),
+            )
+        )
     if q:
         like = f"%{q.strip()}%"
         conds.append(or_(Transaction.merchant.ilike(like), Transaction.note.ilike(like)))
@@ -219,7 +378,8 @@ def list_transactions(
     total = session.scalar(select(func.count()).select_from(Transaction).where(*conds))
     sums = dict(
         session.execute(
-            select(Transaction.kind, func.sum(Transaction.amount)).where(*conds).group_by(Transaction.kind)
+            # Your own share: a ₹1,200 dinner split three ways is ₹400 of spending.
+            select(Transaction.kind, func.sum(Transaction.own_amount)).where(*conds).group_by(Transaction.kind)
         ).all()
     )
     items = session.scalars(
@@ -237,33 +397,37 @@ def list_transactions(
 @router.post("/transactions", response_model=TransactionOut, status_code=201)
 def create_transaction(body: TransactionIn, session: Session = DB):
     _validate_txn(session, body)
-    txn = Transaction(**body.model_dump())
+    txn = Transaction(**body.model_dump(exclude={"splits"}))
     session.add(txn)
     session.flush()
+    _save_splits(session, txn, body.splits)
     services.audit(session, "transaction", txn.id, "create", body.model_dump(mode="json"))
     session.commit()
-    return txn
+    return _out(session, txn)
 
 
 @router.put("/transactions/{txn_id}", response_model=TransactionOut)
 def update_transaction(txn_id: int, body: TransactionIn, session: Session = DB):
     txn = _get(session, Transaction, txn_id, "transaction")
     _validate_txn(session, body, existing=txn)
-    before = services.snapshot(txn, TXN_FIELDS)
-    for k, v in body.model_dump().items():
+    before = _txn_snapshot(txn)
+    for k, v in body.model_dump(exclude={"splits"}).items():
         setattr(txn, k, v)
-    after = services.snapshot(txn, TXN_FIELDS)
-    changed = {k: {"from": before[k], "to": after[k]} for k in TXN_FIELDS if before[k] != after[k]}
+    session.flush()
+    _save_splits(session, txn, body.splits)
+    after = _txn_snapshot(txn)
+    changed = {k: {"from": before[k], "to": after[k]} for k in before if before[k] != after[k]}
     if changed:
         services.audit(session, "transaction", txn.id, "update", changed)
     session.commit()
-    return txn
+    return _out(session, txn)
 
 
 @router.delete("/transactions/{txn_id}", status_code=204)
 def delete_transaction(txn_id: int, session: Session = DB):
     txn = _get(session, Transaction, txn_id, "transaction")
-    services.audit(session, "transaction", txn.id, "delete", services.snapshot(txn, TXN_FIELDS))
+    services.audit(session, "transaction", txn.id, "delete", _txn_snapshot(txn))
+    session.execute(delete(TransactionSplit).where(TransactionSplit.transaction_id == txn.id))
     session.delete(txn)
     session.commit()
     return Response(status_code=204)
