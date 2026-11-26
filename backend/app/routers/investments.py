@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import urllib.error
+from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .. import finance, prices, services
+from .. import finance, fx, prices, services
 from ..db import get_session
 from ..models import Account, Instrument, InvestmentTxn, PriceSnapshot
 from ..schemas import (
     AmfiScheme,
+    FxRate,
     InstrumentIn,
     InstrumentOut,
     InvTxnIn,
@@ -222,6 +224,18 @@ def refresh_mf_navs(session: Session = DB):
         nav_date = max(nav_date, s.nav_date) if nav_date else s.nav_date
     session.commit()
     return RefreshResult(updated=updated, not_found=not_found, nav_date=nav_date)
+
+
+@router.get("/fx/usd-inr", response_model=FxRate)
+def usd_inr_rate(request: Request, on: date = Query(alias="date")):
+    """SBI's TT buying rate for USD→INR on a date (or the latest earlier day it published one)."""
+    try:
+        found = fx.get_rate(on, request.app.state.db_path.parent)
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as e:
+        raise HTTPException(502, f"Could not download SBI's USD rates: {e}")
+    if found is None:
+        raise HTTPException(404, "No SBI rate before 6 Jan 2020. Enter the rate manually.")
+    return FxRate(date=on, rate_date=found[0], rate=found[1], source="SBI TT buying rate")
 
 
 @router.get("/amfi/search", response_model=list[AmfiScheme])

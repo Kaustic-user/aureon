@@ -294,6 +294,15 @@ class AmfiScheme(BaseModel):
     nav_date: date | None
 
 
+class FxRate(BaseModel):
+    """USD→INR on `date`. `rate_date` is earlier when SBI published nothing that day (weekend, holiday)."""
+
+    date: date
+    rate_date: date
+    rate: DecStr
+    source: str
+
+
 class RefreshResult(BaseModel):
     updated: int
     not_found: list[str]

@@ -5,7 +5,7 @@ import { CHART, Legend, PortfolioChart } from "../components/charts";
 import { DateField } from "../components/Calendar";
 import { Amount, Button, Card, CardHeader, Dialog, Empty, ErrorNote, Field, Input, PageHeader, Segmented, Select, Skeleton } from "../components/ui";
 import { api, type AmfiScheme, type Holding, type Instrument, type InstrumentKind, type InvTxn } from "../lib/api";
-import { money, pct, rupeesInput, shortDate, todayISO, toPaise } from "../lib/format";
+import { money, parseISO, pct, rupeesInput, shortDate, todayISO, toPaise } from "../lib/format";
 import { useAccounts, useInvalidateAll, usePortfolio, usePortfolioHistory } from "../lib/queries";
 import { cn } from "../lib/utils";
 
@@ -539,6 +539,7 @@ function Stat({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 const US_EXCHANGES = ["NASDAQ", "NYSE"];
+const fxDay = (s: string) => parseISO(s).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 const FX_KEY = "aureon.usdInr"; // last USD→INR rate used, pre-filled next time
 
 function InvTxnForm({ inst, txn, onDone, onCancel }: { inst: Instrument; txn: InvTxn | null; onDone: () => void; onCancel: () => void }) {
@@ -556,7 +557,29 @@ function InvTxnForm({ inst, txn, onDone, onCancel }: { inst: Instrument; txn: In
   const [usd, setUsd] = useState(usStock && !txn);
   const [usdPrice, setUsdPrice] = useState("");
   const [fx, setFx] = useState(() => localStorage.getItem(FX_KEY) ?? "");
+  const [fxInfo, setFxInfo] = useState<{ text: string; warn?: boolean } | null>(null);
   const hasUnits = type !== "dividend";
+
+  // Fill the rate for the chosen date (SBI TT buying rate). Runs when the date changes or USD is switched on;
+  // anything you type afterwards stays until you pick another date.
+  useEffect(() => {
+    if (!usd || !hasUnits || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+    let stale = false;
+    setFxInfo({ text: "Fetching the rate…" });
+    api
+      .get<{ rate: string; rate_date: string }>("/investments/fx/usd-inr", { date })
+      .then((r) => {
+        if (stale) return;
+        setFx(String(Number(r.rate)));
+        setFxInfo({ text: r.rate_date === date ? `SBI TT buying rate, ${fxDay(date)}` : `SBI TT buying rate of ${fxDay(r.rate_date)} (none published on ${fxDay(date)})` });
+      })
+      .catch((e: Error) => {
+        if (!stale) setFxInfo({ text: `${e.message}. Enter the rate manually.`, warn: true });
+      });
+    return () => {
+      stale = true;
+    };
+  }, [usd, hasUnits, date]);
 
   useEffect(() => {
     if (!usd) return;
@@ -630,7 +653,7 @@ function InvTxnForm({ inst, txn, onDone, onCancel }: { inst: Instrument; txn: In
             {usd ? (
               <>
                 <Field label="Price (USD)"><Input value={usdPrice} onChange={(e) => setUsdPrice(e.target.value)} inputMode="decimal" className="font-mono" placeholder="172.50" required /></Field>
-                <Field label="USD → INR" hint="SBI TT buying rate"><Input value={fx} onChange={(e) => setFx(e.target.value)} inputMode="decimal" className="font-mono" placeholder="84.10" required /></Field>
+                <Field label="USD → INR" hint={<span className={fxInfo?.warn ? "text-warn" : undefined}>{fxInfo?.text ?? "SBI TT buying rate"}</span>}><Input value={fx} onChange={(e) => { setFx(e.target.value); setFxInfo({ text: "Entered manually" }); }} inputMode="decimal" className="font-mono" placeholder="84.10" required /></Field>
               </>
             ) : (
               <Field label={inst.kind === "mutual_fund" ? "NAV" : "Price (₹)"}><Input value={price} onChange={(e) => setPrice(e.target.value)} inputMode="decimal" className="font-mono" /></Field>
