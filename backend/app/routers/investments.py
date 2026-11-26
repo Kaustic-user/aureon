@@ -27,7 +27,7 @@ from ..schemas import (
 router = APIRouter(prefix="/investments")
 DB = Depends(get_session)
 
-INV_FIELDS = ["instrument_id", "account_id", "date", "type", "units", "price", "amount", "note"]
+INV_FIELDS = ["instrument_id", "account_id", "date", "type", "units", "price", "usd_price", "fx_rate", "amount", "note"]
 
 
 def _get(session: Session, model, obj_id: int, label: str):

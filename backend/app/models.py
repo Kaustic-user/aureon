@@ -228,6 +228,8 @@ class InvestmentTxn(Base):
     type: Mapped[str] = mapped_column(String(10))
     units: Mapped[Decimal | None] = mapped_column(DecimalText, nullable=True)
     price: Mapped[Decimal | None] = mapped_column(DecimalText, nullable=True)
+    usd_price: Mapped[Decimal | None] = mapped_column(DecimalText, nullable=True)
+    fx_rate: Mapped[Decimal | None] = mapped_column(DecimalText, nullable=True)
     # buy: total paid incl. charges; vest: market value on vest date;
     # sell: net proceeds; dividend: received.
     amount: Mapped[int] = mapped_column(Integer)

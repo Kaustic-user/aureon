@@ -142,6 +142,8 @@ export interface InvTxn {
   type: "buy" | "sell" | "dividend" | "vest";
   units: string | null;
   price: string | null;
+  usd_price: string | null;
+  fx_rate: string | null;
   amount: number;
   note: string | null;
 }

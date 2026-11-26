@@ -230,6 +230,8 @@ class InvTxnIn(BaseModel):
     type: InvTxnType
     units: Annotated[Decimal, Field(gt=0, max_digits=20, decimal_places=6)] | None = None
     price: Annotated[Decimal, Field(gt=0, max_digits=20, decimal_places=6)] | None = None
+    usd_price: Annotated[Decimal, Field(gt=0, max_digits=20, decimal_places=6)] | None = None
+    fx_rate: Annotated[Decimal, Field(gt=0, max_digits=20, decimal_places=6)] | None = None
     amount: Paise
     note: OptText = None
 
@@ -242,6 +244,8 @@ class InvTxnOut(ORM):
     type: str
     units: DecStr | None
     price: DecStr | None
+    usd_price: DecStr | None
+    fx_rate: DecStr | None
     amount: int
     note: str | None
 

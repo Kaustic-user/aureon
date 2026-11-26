@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Archive, ArchiveRestore, Loader2, Plus, RefreshCw, Search, Tag, Trash2, TrendingUp } from "lucide-react";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { CHART, Legend, PortfolioChart } from "../components/charts";
 import { DateField } from "../components/Calendar";
 import { Amount, Button, Card, CardHeader, Dialog, Empty, ErrorNote, Field, Input, PageHeader, Segmented, Select, Skeleton } from "../components/ui";
@@ -476,7 +476,23 @@ function HoldingDialog({ holding, onClose }: { holding: Holding | null; onClose:
                         <td className="py-2">
                           <span className={cn("rounded px-1.5 py-0.5 text-[11px] font-medium uppercase", t.type === "buy" ? "bg-teal-500/10 text-accent" : t.type === "vest" ? "bg-violet-500/10 text-violet-400" : t.type === "sell" ? "bg-amber-500/10 text-warn" : "bg-green-500/10 text-income")}>{t.type}</span>
                         </td>
-                        <td className="maskable py-2 text-right font-mono text-xs text-muted">{t.units ? `${dec(t.units, 4)} @ ${dec(t.price, 2)}` : ""}</td>
+                        <td className="maskable py-2 text-right font-mono text-xs text-muted">
+                          {t.units ? (
+                            <>
+                              {dec(t.units, 4)} @ {dec(t.price, 2)}
+                              {(() => {
+                                const usdPerShare = t.usd_price ?? extractUsdNote(t.note).usdPrice;
+                                if (!usdPerShare) return null;
+                                const totalUsd = Number(t.units) * Number(usdPerShare);
+                                return (
+                                  <span className="ml-1.5 text-faint">
+                                    (${totalUsd.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+                                  </span>
+                                );
+                              })()}
+                            </>
+                          ) : ""}
+                        </td>
                         <td className="py-2 text-right"><Amount value={t.amount} exact={t.amount % 100 !== 0} /></td>
                         <td className="hidden px-3 py-2 text-right text-xs text-faint sm:table-cell">{t.account_id ? accName.get(t.account_id) : "—"}</td>
                       </tr>
@@ -542,6 +558,19 @@ const US_EXCHANGES = ["NASDAQ", "NYSE"];
 const fxDay = (s: string) => parseISO(s).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 const FX_KEY = "aureon.usdInr"; // last USD→INR rate used, pre-filled next time
 
+/** Pull "$163.30 × ₹88.25" back out of a saved note so the edit form can restore USD fields. */
+function extractUsdNote(raw: string | null | undefined): { userNote: string; usdPrice: string; usdFx: string } {
+  const none = { userNote: raw ?? "", usdPrice: "", usdFx: "" };
+  if (!raw) return none;
+  const m = raw.match(/\$([0-9.]+) × ₹([0-9.]+)/);
+  if (!m) return none;
+  return {
+    userNote: raw.replace(/\s*·?\s*\$[0-9.]+ × ₹[0-9.]+/, "").trim(),
+    usdPrice: m[1],
+    usdFx: m[2],
+  };
+}
+
 function InvTxnForm({ inst, txn, onDone, onCancel }: { inst: Instrument; txn: InvTxn | null; onDone: () => void; onCancel: () => void }) {
   const { data: accounts = [] } = useAccounts();
   const [type, setType] = useState<InvTxn["type"]>(txn?.type ?? "buy");
@@ -549,21 +578,36 @@ function InvTxnForm({ inst, txn, onDone, onCancel }: { inst: Instrument; txn: In
   const [units, setUnits] = useState(txn?.units ?? "");
   const [price, setPrice] = useState(txn?.price ?? "");
   const [amount, setAmount] = useState(txn ? rupeesInput(txn.amount) : "");
-  const [amountTouched, setAmountTouched] = useState(!!txn);
+  const [amountTouched, setAmountTouched] = useState(() => {
+    if (!txn || !txn.units || !txn.price) return false;
+    return Math.abs(txn.amount - Math.round(Number(txn.units) * Number(txn.price) * 100)) > 1;
+  });
   const [accountId, setAccountId] = useState(txn ? String(txn.account_id ?? "") : String(accounts.find((a) => a.type === "bank" && !a.archived)?.id ?? ""));
-  const [note, setNote] = useState(txn?.note ?? "");
+  const [note, setNote] = useState(() => {
+    if (!txn) return "";
+    const usStock_ = inst.kind === "stock" && US_EXCHANGES.includes(inst.exchange ?? "");
+    return usStock_ ? extractUsdNote(txn.note).userNote : (txn.note ?? "");
+  });
   // USD helper for US-listed shares: price in USD × USD→INR rate gives the ₹ price.
   const usStock = inst.kind === "stock" && US_EXCHANGES.includes(inst.exchange ?? "");
-  const [usd, setUsd] = useState(usStock && !txn);
-  const [usdPrice, setUsdPrice] = useState("");
-  const [fx, setFx] = useState(() => localStorage.getItem(FX_KEY) ?? "");
+  const parsed = usStock && txn ? extractUsdNote(txn.note) : null;
+  const savedUsdPrice = txn?.usd_price ?? parsed?.usdPrice ?? "";
+  const savedFxRate = txn?.fx_rate ?? parsed?.usdFx ?? "";
+  const [usd, setUsd] = useState(!!savedUsdPrice || (usStock && !txn));
+  const [usdPrice, setUsdPrice] = useState(savedUsdPrice);
+  const [fx, setFx] = useState(() => savedFxRate || localStorage.getItem(FX_KEY) || "");
   const [fxInfo, setFxInfo] = useState<{ text: string; warn?: boolean } | null>(null);
+  const skipInitialFxFetch = useRef(!!savedFxRate);
   const hasUnits = type !== "dividend";
 
   // Fill the rate for the chosen date (SBI TT buying rate). Runs when the date changes or USD is switched on;
   // anything you type afterwards stays until you pick another date.
   useEffect(() => {
     if (!usd || !hasUnits || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
+    if (skipInitialFxFetch.current) {
+      skipInitialFxFetch.current = false;
+      return;
+    }
     let stale = false;
     setFxInfo({ text: "Fetching the rate…" });
     api
@@ -584,7 +628,8 @@ function InvTxnForm({ inst, txn, onDone, onCancel }: { inst: Instrument; txn: In
   useEffect(() => {
     if (!usd) return;
     const p = Number(usdPrice), r = Number(fx);
-    setPrice(p > 0 && r > 0 ? String(Math.round(p * r * 10000) / 10000) : "");
+    // Only recompute when both values are present; never blank out the price just because usdPrice is empty yet.
+    if (p > 0 && r > 0) setPrice(String(Math.round(p * r * 10000) / 10000));
   }, [usd, usdPrice, fx]);
 
   // Suggest amount = units × price until the user edits it (charges, stamp duty…)
@@ -604,8 +649,6 @@ function InvTxnForm({ inst, txn, onDone, onCancel }: { inst: Instrument; txn: In
     e.preventDefault();
     const paise = toPaise(amount);
     if (!paise) return;
-    // Keep the USD figures with the entry, so the ₹ value can be traced later.
-    const usdNote = usd && hasUnits && usdPrice && fx ? `$${usdPrice} × ₹${fx}` : "";
     if (usd && fx) localStorage.setItem(FX_KEY, fx);
     save.mutate({
       instrument_id: inst.id,
@@ -614,8 +657,10 @@ function InvTxnForm({ inst, txn, onDone, onCancel }: { inst: Instrument; txn: In
       type,
       units: hasUnits ? units.trim() : null,
       price: !hasUnits || !price.trim() ? null : price.trim(),
+      usd_price: usd && hasUnits && usdPrice.trim() ? usdPrice.trim() : null,
+      fx_rate: usd && hasUnits && fx.trim() ? fx.trim() : null,
       amount: paise,
-      note: [note.trim(), usdNote].filter(Boolean).join(" · ") || null,
+      note: note.trim() || null,
     });
   }
 
